@@ -1,0 +1,1112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AI 终极横评 · Act 2: 8仓深度融合 3D 空间运镜与爆炸分解 (s02_divergence 18.0s)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  html, body {
+    width: 1920px; height: 1080px; overflow: hidden;
+    background: #0D131A;
+    font-family: "Alibaba PuHuiTi", "HarmonyOS Sans SC", "MiSans", "PingFang SC", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage {
+    position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: hidden;
+    background: linear-gradient(180deg, #F6F8FC 0%, #EEF2F8 54%, #E2E8F2 100%);
+  }
+  /* video-shotcraft Look.tsx Stage Lighting + Vignette + Film Grain */
+  #stage-light {
+    position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(ellipse 62% 65% at 48% 12%, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0) 70%),
+      radial-gradient(ellipse 52% 48% at 85% 88%, rgba(49,134,255,0.10) 0%, rgba(49,134,255,0) 72%),
+      radial-gradient(ellipse 50% 45% at 15% 85%, rgba(217,119,87,0.09) 0%, rgba(217,119,87,0) 70%);
+  }
+  #bg-dots {
+    position: absolute; inset: 0; pointer-events: none;
+    background-image:
+      radial-gradient(circle, rgba(148,163,184,0.42) 2px, transparent 2.6px),
+      linear-gradient(to right, rgba(148,163,184,0.13) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148,163,184,0.13) 1px, transparent 1px);
+    background-size: 48px 48px, 240px 240px, 240px 240px;
+  }
+  #vignette {
+    position: absolute; inset: 0; pointer-events: none; z-index: 60;
+    background: radial-gradient(ellipse 76% 76% at 50% 48%, rgba(13,19,26,0) 52%, rgba(13,19,26,0.16) 100%);
+  }
+  .scene-layer {
+    position: absolute; inset: 0; width: 1920px; height: 1080px; overflow: hidden;
+    pointer-events: none;
+  }
+  .num { font-family: "Inter", "DIN Alternate", "JetBrains Mono", sans-serif; font-variant-numeric: tabular-nums; }
+  .mono { font-family: "JetBrains Mono", "SF Mono", "Consolas", monospace; font-variant-numeric: tabular-nums; }
+  .stk { position: absolute; left: 0; top: 0; transform-origin: 50% 50%; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <!-- SVG Filters: video-shotcraft SpeedBlur + pdoom-video #stampInk + IntegrationHubMap #pipeGlow -->
+  <svg width="0" height="0" style="position:absolute">
+    <defs>
+      <filter id="speedBlur" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+        <feGaussianBlur id="speedBlurG" in="SourceGraphic" stdDeviation="0 0" edgeMode="duplicate"/>
+      </filter>
+      <filter id="stampInk" x="-5%" y="-5%" width="110%" height="110%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.042" numOctaves="3" seed="19" result="noise"/>
+        <feDisplacementMap in="SourceGraphic" in2="noise" scale="3.8" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+      <filter id="pipeGlow" filterUnits="userSpaceOnUse" x="0" y="0" width="1920" height="1080">
+        <feGaussianBlur stdDeviation="8" result="b"/>
+        <feMerge>
+          <feMergeNode in="b"/>
+          <feMergeNode in="SourceGraphic"/>
+        </feMerge>
+      </filter>
+    </defs>
+  </svg>
+
+  <div id="stage-light"></div>
+  <div id="bg-dots"></div>
+
+  <!-- SCENE 1 (0.00s - 4.40s): KeycapSmashCut + IntegrationHubMap 180° 3D Flip & Optical Comet Pipes -->
+  <div id="scene1" class="scene-layer"></div>
+
+  <!-- SCENE 2 (4.40s - 9.60s): Terminal3D + Basic3DScene stepTransform.inverse() 3D Spatial Flight -->
+  <div id="scene2" class="scene-layer"></div>
+
+  <!-- SCENE 3 (9.60s - 14.20s): ExplodedView 3/4 Axonometric 5-Layer 3D Decomposition & Callouts -->
+  <div id="scene3" class="scene-layer"></div>
+
+  <!-- SCENE 4 (14.20s - 18.00s): SceneOpen PageCam 3D Card Levitation + Perimeter Beam + R1 Hold -->
+  <div id="scene4" class="scene-layer"></div>
+
+  <!-- FlashCut overlay (video-shotcraft Main.tsx warm flash cut straddling scene transitions) -->
+  <div id="flash-cut" style="position:absolute;inset:0;background:#FFFDF9;opacity:0;pointer-events:none;z-index:55"></div>
+
+  <!-- Global HUD Layer (Top Chapter Pill, Right Telemetry, Bottom Voiceover Pill + Spark-Fuse) -->
+  <div id="hud-layer" class="scene-layer" style="z-index:65"></div>
+  <div id="vignette"></div>
+</div>
+
+<script type="module">
+// ============================================================================
+// 1. UNIFIED MATHEMATICAL ENGINE (Ported directly from video-shotcraft/demos/_fixtures/Polish.tsx,
+//    Look.tsx, Manim rate_functions.py, and mg-hook physics)
+// ============================================================================
+const clamp = (x, a = 0, b = 1) => x < a ? a : x > b ? b : x;
+const clamp01 = x => x < 0 ? 0 : x > 1 ? 1 : x;
+const mix = (a, b, t) => a + (b - a) * t;
+const lerp = mix;
+
+// Newton-Raphson + bisection cubic-bezier solver from video-shotcraft Polish.tsx
+function bezier(x1, y1, x2, y2) {
+  if (x1 === y1 && x2 === y2) return t => clamp01(t);
+  const ax = 1 - 3 * x2 + 3 * x1, bx = 3 * x2 - 6 * x1, cx = 3 * x1;
+  const ay = 1 - 3 * y2 + 3 * y1, by = 3 * y2 - 6 * y1, cy = 3 * y1;
+  const sx = u => ((ax * u + bx) * u + cx) * u;
+  const sy = u => ((ay * u + by) * u + cy) * u;
+  const dx = u => (3 * ax * u + 2 * bx) * u + cx;
+  const solve = x => {
+    let u = x;
+    for (let i = 0; i < 8; i++) {
+      const err = sx(u) - x;
+      if (Math.abs(err) < 1e-7) return u;
+      const d = dx(u);
+      if (Math.abs(d) < 1e-6) break;
+      u -= err / d;
+    }
+    let lo = 0, hi = 1; u = x;
+    for (let i = 0; i < 30; i++) {
+      const v = sx(u);
+      if (Math.abs(v - x) < 1e-7) break;
+      if (v < x) lo = u; else hi = u;
+      u = (lo + hi) / 2;
+    }
+    return u;
+  };
+  return t => (t <= 0 ? 0 : t >= 1 ? 1 : sy(solve(t)));
+}
+
+// Named easing presets from video-shotcraft Polish.tsx & Basic3DScene.tsx
+const EASE = {
+  snappy:    bezier(0.16, 1, 0.3, 1),
+  out:       bezier(0.22, 1, 0.36, 1),
+  smooth:    bezier(0.65, 0, 0.35, 1),
+  swift:     bezier(0.4, 0, 0.2, 1),
+  fly:       bezier(0.62, 0, 0.16, 1), // Basic3DScene FLY_EASE
+  flipCubic: bezier(0.215, 0.61, 0.355, 1), // IntegrationHubMap fast-flip slow-settle
+  exit:      bezier(0.7, 0, 0.84, 0),
+  anticip:   bezier(0.5, -0.32, 0.25, 1),
+  overshoot: bezier(0.34, 1.45, 0.64, 1),
+  linear:    t => clamp01(t),
+};
+
+// Time ramp in seconds
+const ramp = (t, start, dur, ease = EASE.snappy) =>
+  ease(clamp01((t - start) / Math.max(1e-5, dur)));
+
+// Closed-form spring & slap from mg-hook & video-shotcraft Look.tsx
+const wob = (dt, f = 4.8, k = 10.5) => dt < 0 ? 0 : Math.exp(-k * dt) * Math.cos(2 * Math.PI * f * dt);
+function spring(dt, f = 2.6, z = 0.38) {
+  if (dt <= 0) return 0;
+  const w = 2 * Math.PI * f, a = z * w, b = w * Math.sqrt(1 - z * z);
+  return 1 - Math.exp(-a * dt) * (Math.cos(b * dt) + (a / b) * Math.sin(b * dt));
+}
+function springV(dt, f = 2.6, z = 0.38) {
+  if (dt <= 0) return 0;
+  const w = 2 * Math.PI * f, a = z * w, b = w * Math.sqrt(1 - z * z);
+  return Math.exp(-a * dt) * (w * w / b) * Math.sin(b * dt);
+}
+function popSS(t, t0, f = 2.7, z = 0.36, amt = 0.14) {
+  const dt = t - t0;
+  if (dt <= 0) return { s: 0, sx: 0, sy: 0, o: 0 };
+  const s = spring(dt, f, z);
+  const k = clamp(springV(dt, f, z) / (2 * Math.PI * f) * amt * 2, -0.26, 0.26);
+  return { s, sx: s * (1 - k * 0.65), sy: s * (1 + k), o: clamp(dt * 14) };
+}
+function slap(t, land, dur = 0.18, amp = 0.34, tilt = 5) {
+  const p = (t - (land - dur)) / dur;
+  if (p < 0) return { o: 0, s: 1 + amp, sx: 1 + amp, sy: 1 + amp, r: tilt, lift: 1 };
+  if (p < 1) {
+    const L = 1 - p * p;
+    return { o: clamp(p * 5), s: 1 + amp * L, sx: 1 + amp * L, sy: 1 + amp * L, r: tilt * L, lift: L };
+  }
+  const w = wob(t - land, 4.6, 10);
+  return { o: 1, s: 1 - 0.04 * w, sx: 1 + 0.045 * w, sy: 1 - 0.055 * w, r: -0.9 * w, lift: 0 };
+}
+const hash = n => {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453123;
+  return x - Math.floor(x);
+};
+
+// Two-layer elevation shadow from video-shotcraft Polish.tsx softShadow()
+function softShadow(elevation, rgb = '15,23,42', strength = 1) {
+  const e = Math.max(0, elevation);
+  const contactA = (0.14 * strength) / (1 + e / 24);
+  const ambientA = (0.10 + (Math.min(e, 64) / 64) * 0.22) * strength;
+  return `0 ${(0.5 + e * 0.06).toFixed(1)}px ${(1 + e * 0.18).toFixed(1)}px rgba(${rgb},${contactA.toFixed(3)}), ` +
+         `0 ${(e * 0.55).toFixed(1)}px ${(e * 1.3).toFixed(1)}px ${(-e * 0.22).toFixed(1)}px rgba(${rgb},${ambientA.toFixed(3)})`;
+}
+
+// ============================================================================
+// 2. OFFICIAL BRAND SVG LOGOS (Exact vector paths from mg-hook)
+// ============================================================================
+const LOGO_SVG = {
+  gemini: (sz = 72) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}"><defs><linearGradient id="gGem" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#3186FF"/><stop offset="55%" stop-color="#8B5CF6"/><stop offset="100%" stop-color="#F94543"/></linearGradient></defs><path d="M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z" fill="url(#gGem)"/></svg>`,
+  claude: (sz = 72) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}"><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z" fill="#D97757"/></svg>`,
+  chatgpt: (sz = 72) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}"><path d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z" fill="#10A37F"/></svg>`
+};
+
+const SVGNS = 'http://www.w3.org/2000/svg';
+function el(tag, cls, parent, css, html) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (css) e.style.cssText = css;
+  if (html != null) e.innerHTML = html;
+  parent.appendChild(e);
+  return e;
+}
+function sv(tag, attrs, parent) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  parent.appendChild(e);
+  return e;
+}
+
+const scene1 = document.getElementById('scene1');
+const scene2 = document.getElementById('scene2');
+const scene3 = document.getElementById('scene3');
+const scene4 = document.getElementById('scene4');
+const hudLayer = document.getElementById('hud-layer');
+const flashCut = document.getElementById('flash-cut');
+const speedBlurG = document.getElementById('speedBlurG');
+
+// ============================================================================
+// 3. GLOBAL HUD (mg-hook & pdoom-video Unified Chrome)
+// ============================================================================
+const topHeader = el('div', 'stk', hudLayer,
+  `left:84px;top:40px;padding:13px 26px;border-radius:999px;background:#1D2731;border:6px solid #F7F9FB;box-shadow:0 12px 28px rgba(18,28,40,.20);display:flex;align-items:center;gap:14px`,
+  `<span style="width:15px;height:15px;border-radius:50%;background:#FF5A36;box-shadow:0 0 12px #FF5A36"></span>
+   <span id="topPhaseTxt" style="font:900 23px/1 'Alibaba PuHuiTi';color:#F8FAFC;letter-spacing:.04em;white-space:nowrap">01 告别同质化内卷 · 3D 翻面分流中枢</span>`
+);
+topHeader.setAttribute('data-box', 'top-header');
+const topPhaseTxt = topHeader.querySelector('#topPhaseTxt');
+
+const telemetryCard = el('div', 'stk mono', hudLayer,
+  `left:1352px;top:40px;width:484px;border-radius:18px;background:#141C26;border:5px solid #F7F9FB;box-shadow:0 12px 28px rgba(14,20,28,.22);padding:11px 18px;color:#E2E8F0`,
+  `<div style="display:flex;justify-content:space-between;font-size:13px;color:#94A3B8;margin-bottom:6px;border-bottom:1px solid #263445;padding-bottom:4px">
+     <span>SHOTCRAFT 3D ENGINE // ACT 02</span>
+     <span id="teleRecipe" style="color:#38BDF8;font-weight:800">RECIPE: HUB_FLIP_3D</span>
+   </div>
+   <div style="display:flex;justify-content:space-between;font-size:14px;font-weight:700">
+     <span style="color:#3186FF">Gem: 2M+原生视频</span>
+     <span style="color:#D97757">Cld: 架构+长文</span>
+     <span style="color:#10A37F">GPT: 全能Agent</span>
+   </div>`
+);
+telemetryCard.setAttribute('data-box', 'top-telemetry');
+const teleRecipe = telemetryCard.querySelector('#teleRecipe');
+
+const subPill = el('div', 'stk', hudLayer,
+  `left:260px;top:948px;width:1400px;height:86px;border-radius:999px;background:#1D2731;border:6px solid #F7F9FB;box-shadow:0 16px 38px rgba(18,28,40,.28);padding:0 42px;display:flex;align-items:center;justify-content:space-between`,
+  `<div id="subTxt" style="font:900 35px/1 'Alibaba PuHuiTi';color:#F8FAFC;letter-spacing:.02em;white-space:nowrap">现在的三大巨头早就放弃了「同质化内卷」</div>
+   <div id="subTime" class="mono" style="font:800 21px/1 'JetBrains Mono';color:#94A3B8">00.0s / 18.0s</div>
+   <div style="position:absolute;left:36px;right:36px;bottom:0;height:6px;background:#0F172A;border-radius:4px;overflow:hidden">
+     <div id="fuseFill" style="height:100%;width:0%;background:linear-gradient(90deg,#38BDF8,#FBBF24,#FF5A36)"></div>
+   </div>`
+);
+subPill.setAttribute('data-box', 'bottom-sub');
+const subTxt = subPill.querySelector('#subTxt');
+const subTime = subPill.querySelector('#subTime');
+const fuseFill = subPill.querySelector('#fuseFill');
+
+const CAPTIONS = [
+  [0.00, 2.30, '现在的三大巨头早就放弃了<span style="color:#FF5A36">「同质化内卷」</span>'],
+  [2.30, 5.45, '走上了<span style="color:#38BDF8">截然不同的进化路线</span>。'],
+  [5.45, 7.55, '选错工具，不仅<span style="color:#FFC62B">浪费订阅费</span> 💸'],
+  [7.55, 10.25, '还会让你在工作流里<span style="color:#FF5A36">多走弯路</span>。'],
+  [10.25, 12.20, '今天我们就抛开<span style="color:#FF5A36">枯燥的跑分榜单</span> 🚫'],
+  [12.20, 14.68, '直接从<span style="color:#38BDF8">真实生产力场景</span>出发 ⚡'],
+  [14.68, 18.05, '看看这<span style="color:#FFC62B">三位顶流</span>到底该怎么选。']
+];
+
+// ============================================================================
+// 4. SCENE 1 (0.00s - 4.40s):
+//    Recipe: video-shotcraft KeycapSmashCut.tsx + IntegrationHubMap.tsx
+//    - Front Panel: "旧时代：同质化刷榜考卷 (MMLU 92.1% / 92.0% / 91.9%)"
+//    - 3D Mechanical Keycap (⌘⏎ 进化分流) slams at t=1.10s + shockwave ring
+//    - 180° 3D Y-Axis Flip (rotY: 0 -> 180deg, fast flip + slow settle + 90° edge bloom)
+//    - Back Panel: "2026 AI 进化分流中枢" + 3 Brand Tiles + Rainbow Optical Comet Pipes
+// ============================================================================
+const s1Persp = el('div', '', scene1, 'position:absolute;inset:0;perspective:1800px;perspective-origin:960px 490px');
+const s1BgRects = el('div', '', s1Persp, 'position:absolute;inset:0');
+const S1_DECO_RECTS = [
+  { x: 110, y: 160, w: 180, h: 90, c: '#3186FF' },
+  { x: 1620, y: 170, w: 190, h: 96, c: '#10A37F' },
+  { x: 140, y: 740, w: 160, h: 84, c: '#D97757' },
+  { x: 1610, y: 730, w: 175, h: 88, c: '#8B5CF6' }
+].map(r => el('div', '', s1BgRects,
+  `position:absolute;left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;border-radius:16px;border:2px dashed ${r.c};opacity:0`
+));
+
+// Optical Comet Pipes SVG Layer (from IntegrationHubMap.tsx)
+const s1PipesSvg = sv('svg', { width: 1920, height: 1080, style: 'position:absolute;inset:0;overflow:visible' }, s1Persp);
+const S1_PIPES = [
+  { id: 'gemini', col: '#3186FF', tileX: 248, tileY: 460, label: '多模态巨兽 · 2M吞吐', sub: '原生视频 / 百万代码库', path: 'M 438 460 L 560 460', len: 122 },
+  { id: 'claude', col: '#D97757', tileX: 960, tileY: 822, label: '代码与长文工匠', sub: 'Claude Code / 零AI味', path: 'M 960 738 L 960 665', len: 73 },
+  { id: 'chatgpt', col: '#10A37F', tileX: 1672, tileY: 460, label: '全能Agent管家', sub: 'DeepResearch / 满血语音', path: 'M 1482 460 L 1360 460', len: 122 }
+].map((p, i) => {
+  const basePath = sv('path', {
+    d: p.path, fill: 'none', stroke: p.col, 'stroke-width': 14, 'stroke-linecap': 'round',
+    filter: 'url(#pipeGlow)', 'stroke-dasharray': `0 ${p.len + 40}`
+  }, s1PipesSvg);
+  const corePath = sv('path', {
+    d: p.path, fill: 'none', stroke: '#FFFFFF', 'stroke-width': 4, 'stroke-linecap': 'round',
+    'stroke-dasharray': `0 ${p.len + 40}`
+  }, s1PipesSvg);
+  const cometPath = sv('path', {
+    d: p.path, fill: 'none', stroke: '#FFFFFF', 'stroke-width': 8, 'stroke-linecap': 'round',
+    'stroke-dasharray': '18 46', opacity: 0
+  }, s1PipesSvg);
+  const spark = sv('circle', { cx: 0, cy: 0, r: 9, fill: '#FFFFFF', stroke: p.col, 'stroke-width': 4, opacity: 0 }, s1PipesSvg);
+
+  // Capability Tile Card (2.5D Keycap Tile)
+  const tw = 368, th = 164;
+  const tile = el('div', 'stk', s1Persp,
+    `left:${p.tileX - tw / 2}px;top:${p.tileY - th / 2}px;width:${tw}px;height:${th}px;border-radius:28px;background:#FFFFFF;border:5px solid ${p.col};box-shadow:0 10px 0 ${p.col}33, 0 20px 44px rgba(15,23,42,.18);padding:16px 20px;display:flex;align-items:center;gap:14px;opacity:0`,
+    `<div style="width:74px;height:74px;border-radius:18px;background:${p.col}15;border:3px solid ${p.col};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+       ${LOGO_SVG[p.id](50)}
+     </div>
+     <div>
+       <div class="mono" style="font:800 14px/1 'JetBrains Mono';color:${p.col};letter-spacing:.10em">TRACK 0${i + 1} // DIVERGED</div>
+       <div style="font:900 22px/1.15 'Alibaba PuHuiTi';color:#0F172A;margin-top:6px;white-space:nowrap">${p.label}</div>
+       <div style="font:700 17px/1.2 'Alibaba PuHuiTi';color:#64748B;margin-top:6px;white-space:nowrap">${p.sub}</div>
+     </div>`
+  );
+  tile.setAttribute('data-box', `s1-tile-${i}`);
+  return { ...p, basePath, corePath, cometPath, spark, tile };
+});
+
+// 3D Double-Sided Flip Panel Container (PW=800, PH=440, centered at 960, 440)
+const PW1 = 800, PH1 = 440;
+const s1FlipRig = el('div', '', s1Persp,
+  `position:absolute;left:${960 - PW1 / 2}px;top:${435 - PH1 / 2}px;width:${PW1}px;height:${PH1}px;transform-style:preserve-3d`
+);
+s1FlipRig.setAttribute('data-box', 's1-hub-panel');
+
+// Front Face (rotY = 0): Old Homogeneous Benchmark Involution Sheet
+const s1Front = el('div', '', s1FlipRig,
+  `position:absolute;inset:0;border-radius:30px;background:#FFFFFF;border:6px solid #1E293B;box-shadow:0 14px 0 #0F172A, 0 28px 60px rgba(15,23,42,.22);padding:30px 38px;backface-visibility:hidden`
+);
+s1Front.innerHTML = `
+  <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #E2E8F0;padding-bottom:18px">
+    <div>
+      <div class="mono" style="font:800 16px/1 'JetBrains Mono';color:#E63946;letter-spacing:.16em">OLD PARADIGM // 过去：同质化内卷</div>
+      <div style="font:900 38px/1.15 'Alibaba PuHuiTi';color:#0F172A;margin-top:8px">三大模型死磕同一张「纸面刷榜卷」</div>
+    </div>
+    <span style="padding:10px 18px;border-radius:14px;background:#FEE2E2;color:#DC2626;font:900 22px/1 'Alibaba PuHuiTi'">⚠️ 0.1% 贴身肉搏</span>
+  </div>
+  <div style="margin-top:24px;display:flex;flex-direction:column;gap:18px">
+    ${[
+      ['MMLU-Pro 综合刷题分', '92.1% vs 92.0% vs 91.9%', '#64748B'],
+      ['GPQA 封闭奥赛题库', '89.4% vs 89.2% vs 89.1%', '#64748B'],
+      ['HumanEval 百行孤立算法', '94.2% vs 94.0% vs 93.8%', '#64748B']
+    ].map(([k, v]) => `
+      <div style="display:flex;align-items:center;gap:18px">
+        <div style="width:270px;font:800 23px/1 'Alibaba PuHuiTi';color:#334155">${k}</div>
+        <div style="flex:1;height:28px;border-radius:10px;background:#E2E8F0;overflow:hidden;padding:4px">
+          <div style="width:92%;height:100%;border-radius:7px;background:linear-gradient(90deg,#475569,#94A3B8)"></div>
+        </div>
+        <div class="mono" style="width:230px;text-align:right;font:800 18px/1 'JetBrains Mono';color:#475569">${v}</div>
+      </div>
+    `).join('')}
+  </div>
+`;
+
+// Back Face (rotY = 180deg): New 2026 Divergent Evolution Hub
+const s1Back = el('div', '', s1FlipRig,
+  `position:absolute;inset:0;border-radius:30px;background:#0F172A;border:6px solid #F8FAFC;box-shadow:0 14px 0 #1E293B, 0 32px 70px rgba(15,23,42,.32);padding:30px 38px;color:#F8FAFC;transform:rotateY(180deg);backface-visibility:hidden`
+);
+s1Back.innerHTML = `
+  <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #1E293B;padding-bottom:16px">
+    <div>
+      <div class="mono" style="font:800 16px/1 'JetBrains Mono';color:#38BDF8;letter-spacing:.18em">2026 EVOLUTION HUB // 进化分流中枢</div>
+      <div style="font:900 38px/1.15 'Alibaba PuHuiTi';color:#FFFFFF;margin-top:8px">放弃同质化内卷 · 三大主场彻底分叉</div>
+    </div>
+    <span style="padding:10px 18px;border-radius:14px;background:#1E293B;border:2px solid #38BDF8;color:#38BDF8;font:900 20px/1 'JetBrains Mono'">3 TRACKS ACTIVE</span>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:24px">
+    <div style="padding:18px;border-radius:20px;background:#1E293B;border:2px solid #3186FF">
+      <div class="mono" style="font:800 15px/1 'JetBrains Mono';color:#60A5FA">ROUTE A · GOOGLE</div>
+      <div style="font:900 28px/1.2 'Inter';margin-top:8px">Gemini 3.1</div>
+      <div style="font:700 19px/1.35 'Alibaba PuHuiTi';color:#CBD5E1;margin-top:10px">专攻 2M 极限上下文与原生音视频多模态吞吐</div>
+    </div>
+    <div style="padding:18px;border-radius:20px;background:#1E293B;border:2px solid #D97757">
+      <div class="mono" style="font:800 15px/1 'JetBrains Mono';color:#FB923C">ROUTE B · ANTHROPIC</div>
+      <div style="font:900 28px/1.2 'Inter';margin-top:8px">Claude 4.6</div>
+      <div style="font:700 19px/1.35 'Alibaba PuHuiTi';color:#CBD5E1;margin-top:10px">专攻复杂软件工程重构与零 AI 味深度写作</div>
+    </div>
+    <div style="padding:18px;border-radius:20px;background:#1E293B;border:2px solid #10A37F">
+      <div class="mono" style="font:800 15px/1 'JetBrains Mono';color:#34D399">ROUTE C · OPENAI</div>
+      <div style="font:900 28px/1.2 'Inter';margin-top:8px">GPT-5.4</div>
+      <div style="font:700 19px/1.35 'Alibaba PuHuiTi';color:#CBD5E1;margin-top:10px">专攻 DeepResearch 全自动调研与实时语音交互</div>
+    </div>
+  </div>
+`;
+
+// KeycapSmashCut Trigger Keycap & Shockwave Ring (bottom-right of panel before flip)
+const s1Ring = el('div', '', s1Persp,
+  `position:absolute;left:960px;top:760px;width:100px;height:100px;border-radius:50%;border:10px solid #FF5A36;transform:translate(-50%,-50%);opacity:0`
+);
+const s1Keycap = el('div', 'stk', s1Persp,
+  `left:880px;top:700px;width:160px;height:110px;border-radius:24px;background:linear-gradient(165deg,#FFFFFF 0%,#F1F5F9 100%);border:4px solid #1E293B;display:flex;flex-direction:column;align-items:center;justify-content:center;font:900 24px/1.1 'Inter';color:#0F172A`,
+  `<span class="mono" style="font-size:15px;color:#FF5A36;font-weight:800">⌘ + ⏎</span><span style="margin-top:4px">引爆分流</span>`
+);
+// 90° Edge White-Hot Bloom Overlay (IntegrationHubMap.tsx f21 2-frame flash)
+const s1EdgeBloom = el('div', '', scene1,
+  `position:absolute;inset:0;background:radial-gradient(ellipse 45% 55% at 50% 42%, rgba(255,255,255,0.95) 0%, rgba(56,189,248,0.35) 45%, transparent 75%);opacity:0;pointer-events:none`
+);
+
+function updateScene1(t) {
+  if (t >= 5.50) { scene1.style.display = 'none'; return; }
+  scene1.style.display = 'block';
+
+  // Keycap press at t = 1.80s..1.92s ("放弃了同质化内卷" -> KeycapSmashCut.tsx)
+  const pressU = ramp(t, 1.80, 0.12, EASE.snappy);
+  const fadeKey = 1 - ramp(t, 2.15, 0.25, EASE.out);
+  const breathY = t < 1.80 ? -5 * Math.sin(t * 6.5) : 0;
+  const pressY = 14 * pressU;
+  const thick = mix(14, 3, pressU);
+  s1Keycap.style.opacity = fadeKey;
+  s1Keycap.style.transform = `translateY(${(breathY + pressY).toFixed(1)}px)`;
+  s1Keycap.style.boxShadow = `0 ${thick.toFixed(1)}px 0 #1E293B, 0 ${(thick * 2 + 10).toFixed(1)}px 28px rgba(15,23,42,0.25)`;
+
+  // Shockwave ring (1.88s -> 2.55s)
+  if (t >= 1.88 && t < 2.60) {
+    const rGrow = ramp(t, 1.88, 0.55, EASE.out);
+    const rFade = 1 - ramp(t, 1.88, 0.68, EASE.linear);
+    const d = mix(90, 760, rGrow);
+    s1Ring.style.width = `${d.toFixed(1)}px`;
+    s1Ring.style.height = `${d.toFixed(1)}px`;
+    s1Ring.style.borderWidth = `${mix(14, 2, rGrow).toFixed(1)}px`;
+    s1Ring.style.opacity = (0.85 * rFade).toFixed(3);
+  } else {
+    s1Ring.style.opacity = 0;
+  }
+
+  // Camera zoom pull-back (1.22 -> 0.96) + 180° Y-axis fast flip (t=1.92s..3.02s)
+  const camU = ramp(t, 1.65, 1.55, EASE.fly);
+  const zoom = mix(1.22, 0.96, camU);
+  const flipU = ramp(t, 1.92, 1.10, EASE.flipCubic);
+  const rotY = 180 * flipU;
+  const tiltX = Math.sin(flipU * Math.PI) * 8;
+  s1FlipRig.style.transform = `scale(${zoom.toFixed(4)}) rotateX(${tiltX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
+
+  // Edge bloom peaks when rotY passes 90° (around t = 2.20s)
+  const edgeDist = Math.abs(rotY - 90);
+  s1EdgeBloom.style.opacity = edgeDist < 28 ? ((1 - edgeDist / 28) * 0.85).toFixed(3) : 0;
+
+  // Background parallax deco rects
+  const mapIn = ramp(t, 2.55, 0.55, EASE.out);
+  S1_DECO_RECTS.forEach(r => { r.style.opacity = (mapIn * 0.45).toFixed(3); });
+
+  // Two-beat tile pop (t=2.85s) + optical pipe connection (t=3.18s) + continuous comet flow
+  S1_PIPES.forEach((p, i) => {
+    const tPop = popSS(t, 2.85 + i * 0.14, 2.8, 0.36, 0.14);
+    p.tile.style.opacity = tPop.o;
+    p.tile.style.transform = `scale(${tPop.sx.toFixed(3)}, ${tPop.sy.toFixed(3)})`;
+
+    const grow = ramp(t, 3.18 + i * 0.14, 0.34, EASE.out);
+    const dashOn = p.len * grow;
+    p.basePath.setAttribute('stroke-dasharray', `${dashOn.toFixed(1)} ${p.len + 50}`);
+    p.corePath.setAttribute('stroke-dasharray', `${dashOn.toFixed(1)} ${p.len + 50}`);
+
+    if (grow > 0 && grow < 1) {
+      p.spark.setAttribute('opacity', '1');
+      const nums = p.path.match(/-?[\d.]+/g).map(Number);
+      p.spark.setAttribute('cx', mix(nums[0], nums[2], grow).toFixed(1));
+      p.spark.setAttribute('cy', mix(nums[1], nums[3], grow).toFixed(1));
+    } else {
+      p.spark.setAttribute('opacity', '0');
+    }
+
+    if (grow >= 1) {
+      const flowIn = ramp(t, 3.55, 0.25, EASE.out);
+      const offset = -((t - 3.20) * 140 + i * 25);
+      p.cometPath.setAttribute('opacity', (0.92 * flowIn).toFixed(3));
+      p.cometPath.setAttribute('stroke-dashoffset', offset.toFixed(1));
+    } else {
+      p.cometPath.setAttribute('opacity', '0');
+    }
+  });
+}
+
+// ============================================================================
+// 5. SCENE 2 (4.40s - 9.60s):
+//    Recipe: video-shotcraft Terminal3D.tsx + Basic3DScene.tsx
+//    - Core formula: camera = stepTransform.inverse()
+//    - Isomorphic 3D-projected SVG Perspective Floor Grid (project() -> toScreen())
+//    - Station 1 (4.40s - 6.85s): "01 盲目全订账单终端 (-$60/mo · ¥5,220/yr)"
+//    - Flight 1->2 (6.85s - 7.65s): 3D rotation + sin(pi * u^0.85) * 1100px pull-back hop + SpeedBlur
+//    - Station 2 (7.65s - 9.60s): "02 错误模型工作流返工 (3次报错) -> 黄金光纤直达 ● READY"
+// ============================================================================
+const PERSP2 = 1850;
+const FLOOR_Y2 = 460;
+const S2_POSES = [
+  { x: -1350, y: -10, z: -180, ry: 22 },
+  { x: 1350,  y: 10,  z: 180,  ry: -20 }
+];
+const S2_VIEW = [8, -8];
+const S2_TILT = -4;
+
+const s2FloorSvg = sv('svg', { width: 1920, height: 1080, style: 'position:absolute;inset:0' }, scene2);
+const s2FloorG = sv('g', { stroke: 'rgba(49,134,255,0.26)', 'stroke-width': 1.6 }, s2FloorSvg);
+
+const s2Persp = el('div', '', scene2, `position:absolute;inset:0;perspective:${PERSP2}px;overflow:hidden`);
+const s2World = el('div', '', s2Persp, `position:absolute;left:50%;top:50%;width:0;height:0;transform-style:preserve-3d`);
+
+// 45 3D floating motes in world space (from Basic3DScene.tsx MOTES)
+for (let i = 0; i < 45; i++) {
+  const mx = -2400 + hash(i * 3.1) * 4800;
+  const my = -1200 + hash(i * 5.7 + 1) * 2400;
+  const mz = -1800 + hash(i * 7.3 + 2) * 2400;
+  const mr = 4 + hash(i * 11.9 + 3) * 7;
+  el('div', '', s2World,
+    `position:absolute;left:${-mr}px;top:${-mr}px;width:${mr * 2}px;height:${mr * 2}px;border-radius:50%;background:radial-gradient(circle,rgba(49,134,255,0.45) 0%,rgba(49,134,255,0) 70%);transform:translate3d(${mx.toFixed(0)}px,${my.toFixed(0)}px,${mz.toFixed(0)}px)`
+  );
+}
+
+// Build the 2 Giant 3D Terminal/Workbench Stations (1140 x 590 native 1:1 rasterization)
+const W2 = 1140, H2 = 590;
+const s2Win0 = el('div', '', s2World,
+  `position:absolute;left:${-W2 / 2}px;top:${-H2 / 2}px;width:${W2}px;height:${H2}px;border-radius:30px;background:#0F172A;border:6px solid #F8FAFC;box-shadow:0 30px 80px rgba(15,23,42,.38);overflow:hidden;transform-style:preserve-3d`
+);
+s2Win0.setAttribute('data-box', 's2-win-0');
+s2Win0.innerHTML = `
+  <div style="height:68px;background:#1E293B;border-bottom:2px solid #334155;padding:0 28px;display:flex;align-items:center;gap:14px">
+    <span style="width:15px;height:15px;border-radius:50%;background:#FF5F56"></span>
+    <span style="width:15px;height:15px;border-radius:50%;background:#FFBD2E"></span>
+    <span style="width:15px;height:15px;border-radius:50%;background:#27C93F"></span>
+    <span class="mono" style="margin-left:16px;font:800 22px/1 'JetBrains Mono';color:#FFC62B">01 // SUBSCRIPTION_AUDIT.SH</span>
+    <span class="mono" style="margin-left:auto;font:700 18px/1 'JetBrains Mono';color:#94A3B8">~/billing-waste — zsh</span>
+  </div>
+  <div style="padding:32px 40px;display:flex;justify-content:space-between;align-items:center">
+    <div style="flex:1">
+      <div class="mono" style="font:800 36px/1.2 'JetBrains Mono';color:#F8FAFC">
+        <span style="color:#FFC62B">❯ </span><span id="s2Cmd0">audit --subscriptions</span>
+      </div>
+      <div style="margin-top:26px;display:flex;flex-direction:column;gap:16px;font:700 25px/1.3 'Alibaba PuHuiTi';color:#E2E8F0">
+        <div id="s2W0L0" style="display:flex;align-items:center;gap:14px"><span style="color:#E63946;font-weight:900">✗</span> <span>盲目跟风全订三家 Plus/Pro 会员：<strong style="color:#FFC62B">-$60 / 月</strong></span></div>
+        <div id="s2W0L1" style="display:flex;align-items:center;gap:14px"><span style="color:#E63946;font-weight:900">✗</span> <span>主力场景不匹配导致 <strong style="color:#FF5A36">72% 高级额度闲置浪费</strong></span></div>
+        <div id="s2W0L2" style="display:flex;align-items:center;gap:14px"><span style="color:#38BDF8;font-weight:900">✓</span> <span>精准只充 1 个主场模型 + 2 个免费版 = <strong style="color:#4ADE80">立省 ¥3,480/年</strong></span></div>
+      </div>
+    </div>
+    <div style="width:320px;height:360px;border-radius:24px;background:#1E293B;border:3px solid #FF5A36;padding:24px;display:flex;flex-direction:column;justify-content:space-between;text-align:center">
+      <div class="mono" style="font:800 16px/1 'JetBrains Mono';color:#FF5A36;letter-spacing:.12em">ANNUAL WASTE // 盲目全订</div>
+      <div id="s2DigitRoll" class="num" style="font:900 78px/1 'Inter';color:#FFC62B">-$60</div>
+      <div id="s2RmbRoll" style="font:800 24px/1.2 'Alibaba PuHuiTi';color:#F87171">约合 ¥5,220 / 年</div>
+      <div style="padding:12px;border-radius:14px;background:#FEE2E2;color:#DC2626;font:900 22px/1 'Alibaba PuHuiTi'">💸 选错工具白烧钱</div>
+    </div>
+  </div>
+`;
+
+const s2Win1 = el('div', '', s2World,
+  `position:absolute;left:${-W2 / 2}px;top:${-H2 / 2}px;width:${W2}px;height:${H2}px;border-radius:30px;background:#0F172A;border:6px solid #F8FAFC;box-shadow:0 30px 80px rgba(15,23,42,.38);overflow:hidden;transform-style:preserve-3d`
+);
+s2Win1.setAttribute('data-box', 's2-win-1');
+s2Win1.innerHTML = `
+  <div style="height:68px;background:#1E293B;border-bottom:2px solid #334155;padding:0 28px;display:flex;align-items:center;gap:14px">
+    <span style="width:15px;height:15px;border-radius:50%;background:#FF5F56"></span>
+    <span style="width:15px;height:15px;border-radius:50%;background:#FFBD2E"></span>
+    <span style="width:15px;height:15px;border-radius:50%;background:#27C93F"></span>
+    <span class="mono" style="margin-left:16px;font:800 22px/1 'JetBrains Mono';color:#38BDF8">02 // WORKFLOW_ROUTER.SH</span>
+    <span class="mono" style="margin-left:auto;font:700 18px/1 'JetBrains Mono';color:#94A3B8">~/production-pipeline — zsh</span>
+  </div>
+  <div style="padding:32px 40px">
+    <div class="mono" style="font:800 36px/1.2 'JetBrains Mono';color:#F8FAFC">
+      <span style="color:#38BDF8">❯ </span><span id="s2Cmd1">route --workflow=production</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:24px">
+      <div style="padding:22px;border-radius:22px;background:#1E293B;border:2px solid #EF4444">
+        <div class="mono" style="font:800 16px/1 'JetBrains Mono';color:#F87171">WRONG MODEL // 选错模型写代码/长视频</div>
+        <div style="margin-top:16px;display:flex;flex-direction:column;gap:12px;font:700 22px/1.3 'Alibaba PuHuiTi';color:#FCA5A5">
+          <div>✗ 100K 窗口塞大项目直接截断失忆</div>
+          <div>✗ 多文件改代码幻觉频发 · 返工 ×3</div>
+          <div>✗ 生成口播稿满篇“总而言之”塑料感</div>
+        </div>
+        <div style="margin-top:18px;padding:10px 16px;border-radius:12px;background:#7F1D1D;color:#FECACA;font:900 20px/1 'Alibaba PuHuiTi';text-align:center">⛔ 工作流反复绕弯路 (+2.5小时)</div>
+      </div>
+      <div id="s2ReadyBox" style="padding:22px;border-radius:22px;background:#1E293B;border:3px solid #10B981">
+        <div class="mono" style="font:800 16px/1 'JetBrains Mono';color:#34D399">MATCHED MODEL // 选对主场模型</div>
+        <div style="margin-top:16px;display:flex;flex-direction:column;gap:12px;font:700 22px/1.3 'Alibaba PuHuiTi';color:#D1FAE5">
+          <div>✓ Claude 4.6：跨文件重构一次编译通过</div>
+          <div>✓ Gemini 3.1：4K 原片 2M 窗口秒级拉片</div>
+          <div>✓ GPT-5.4：DeepResearch 全网自动核验</div>
+        </div>
+        <div id="s2ReadyBadge" style="margin-top:18px;padding:10px 16px;border-radius:12px;background:#10B981;color:#052E16;font:900 22px/1 'Alibaba PuHuiTi';text-align:center;box-shadow:0 0 24px rgba(16,185,129,0.55)">● READY 黄金光纤一步直达交付</div>
+      </div>
+    </div>
+  </div>
+`;
+
+const s2DigitRoll = s2Win0.querySelector('#s2DigitRoll');
+const s2RmbRoll = s2Win0.querySelector('#s2RmbRoll');
+const s2ReadyBadge = s2Win1.querySelector('#s2ReadyBadge');
+
+function camAt2(t) {
+  const pullIn = 280 * (1 - ramp(t, 5.45, 0.55, EASE.out));
+  const uFly = ramp(t, 7.45, 0.82, EASE.swift);
+  const rawFly = clamp01((t - 7.45) / 0.82);
+  // Terminal3D.tsx signature mid-flight pull-back hop: sin(pi * u^0.85) * 1100px
+  const hopPull = Math.sin(Math.PI * Math.pow(rawFly, 0.85)) * 1100;
+  const pull = pullIn + hopPull - 30 * ramp(t, 9.30, 0.70, EASE.smooth);
+
+  const a = S2_POSES[0], b = S2_POSES[1];
+  const pose = {
+    x: mix(a.x, b.x, uFly),
+    y: mix(a.y, b.y, uFly),
+    z: mix(a.z, b.z, uFly),
+    ry: mix(a.ry, b.ry, uFly)
+  };
+  const view = mix(S2_VIEW[0], S2_VIEW[1], uFly);
+  return { s: uFly, pull, pose, yaw: view - pose.ry };
+}
+
+function project2(cam, p) {
+  const x0 = p[0] - cam.pose.x, y0 = p[1] - cam.pose.y, z0 = p[2] - cam.pose.z;
+  const ty = (cam.yaw * Math.PI) / 180, tx = (S2_TILT * Math.PI) / 180;
+  const x1 = x0 * Math.cos(ty) + z0 * Math.sin(ty);
+  const z1 = -x0 * Math.sin(ty) + z0 * Math.cos(ty);
+  const y2 = y0 * Math.cos(tx) - z1 * Math.sin(tx);
+  const z2 = y0 * Math.sin(tx) + z1 * Math.cos(tx) - cam.pull;
+  return { x: x1, y: y2, z: z2 };
+}
+function toScreen2(q) {
+  const k = PERSP2 / Math.max(120, PERSP2 - q.z);
+  return { x: 960 + q.x * k, y: 540 + q.y * k, k };
+}
+
+function updateScene2(t) {
+  if (t < 5.45 || t >= 10.30) {
+    scene2.style.display = 'none';
+    scene2.style.filter = 'none';
+    return;
+  }
+  scene2.style.display = 'block';
+
+  const cam = camAt2(t);
+  // Inverse camera transform (Terminal3D.tsx / Basic3DScene.tsx)
+  s2World.style.transform =
+    `translateZ(${(-cam.pull).toFixed(1)}px) rotateX(${S2_TILT}deg) rotateY(${cam.yaw.toFixed(2)}deg) translate3d(${(-cam.pose.x).toFixed(1)}px, ${(-cam.pose.y).toFixed(1)}px, ${(-cam.pose.z).toFixed(1)}px)`;
+
+  // SpeedBlur during flight (7.45s - 8.25s)
+  if (t > 7.47 && t < 8.24) {
+    const flightV = Math.sin(clamp01((t - 7.47) / 0.77) * Math.PI);
+    speedBlurG.setAttribute('stdDeviation', `${(flightV * 14).toFixed(1)} 0`);
+    scene2.style.filter = 'url(#speedBlur)';
+  } else {
+    scene2.style.filter = 'none';
+  }
+
+  // Isomorphic 3D-projected SVG floor grid (Terminal3D.tsx Floor)
+  let floorHtml = '';
+  const CELL = 320;
+  for (let i = -8; i <= 8; i++) {
+    const pa = project2(cam, [i * CELL, FLOOR_Y2, -2200]);
+    const pb = project2(cam, [i * CELL, FLOOR_Y2, 1600]);
+    if (pa.z < PERSP2 - 150 && pb.z < PERSP2 - 150) {
+      const sa = toScreen2(pa), sb = toScreen2(pb);
+      floorHtml += `<line x1="${sa.x.toFixed(1)}" y1="${sa.y.toFixed(1)}" x2="${sb.x.toFixed(1)}" y2="${sb.y.toFixed(1)}"/>`;
+    }
+  }
+  for (let j = -7; j <= 5; j++) {
+    const pa = project2(cam, [-2600, FLOOR_Y2, j * CELL]);
+    const pb = project2(cam, [2600, FLOOR_Y2, j * CELL]);
+    if (pa.z < PERSP2 - 150 && pb.z < PERSP2 - 150) {
+      const sa = toScreen2(pa), sb = toScreen2(pb);
+      floorHtml += `<line x1="${sa.x.toFixed(1)}" y1="${sa.y.toFixed(1)}" x2="${sb.x.toFixed(1)}" y2="${sb.y.toFixed(1)}"/>`;
+    }
+  }
+  s2FloorG.innerHTML = floorHtml;
+
+  // Position & DOF Focus for the 2 3D Windows
+  [s2Win0, s2Win1].forEach((win, i) => {
+    const p = S2_POSES[i];
+    const dist = Math.abs(cam.s - i);
+    const focus = clamp(1 - dist * 0.85, 0.25, 1);
+    win.style.transform = `translate3d(${p.x}px, ${p.y}px, ${p.z}px) rotateY(${p.ry}deg)`;
+    win.style.opacity = (0.28 + 0.72 * focus).toFixed(3);
+    win.style.filter = focus < 0.96 ? `blur(${((1 - focus) * 5).toFixed(1)}px)` : 'none';
+    if (dist < 0.15) {
+      win.setAttribute('data-box', `s2-win-${i}`);
+    } else {
+      win.removeAttribute('data-box');
+    }
+  });
+
+  // Station 1 Rolling Subscription Counter (5.60s -> 7.15s)
+  const billU = ramp(t, 5.60, 1.45, EASE.out);
+  const dollars = Math.round(mix(20, 60, billU));
+  const rmb = Math.round(dollars * 7.25 * 12);
+  s2DigitRoll.textContent = `-$${dollars}`;
+  s2RmbRoll.textContent = `约合 ¥${rmb.toLocaleString()} / 年`;
+
+  // Station 2 Ready Pulse (9.20s)
+  const readyPop = popSS(t, 9.20, 2.8, 0.36, 0.15);
+  s2ReadyBadge.style.transform = `scale(${(readyPop.s || 1).toFixed(3)})`;
+}
+
+// ============================================================================
+// 6. SCENE 3 (9.60s - 14.20s):
+//    Recipe: video-shotcraft ExplodedView.tsx (3/4 Axonometric 5-Layer 3D Decomposition)
+//    - Baseplate (1480 x 840) tilted at rotateX(52deg) rotateZ(-28deg), preserve-3d
+//    - 5 Layers explode along Z-axis (z = 110, 210, 320, 430, 540px) with staggered spring
+//    - Height-dependent blurred shadows on baseplate + dashed component slots
+//    - 3D-projected SVG elbow callouts (project3() -> left/right columns)
+//    - Reverse-order slam assembly (13.10s - 13.85s) + damped thud + <Sheen> sweep
+// ============================================================================
+const W3 = 1360, H3 = 780, PERSP3 = 2400;
+const s3Persp = el('div', '', scene3, `position:absolute;inset:0;perspective:${PERSP3}px;overflow:hidden`);
+const s3BoardRig = el('div', '', s3Persp,
+  `position:absolute;left:${960 - W3 / 2}px;top:${486 - H3 / 2}px;width:${W3}px;height:${H3}px;transform-style:preserve-3d`
+);
+s3BoardRig.setAttribute('data-box', 's3-exploded-rig');
+
+// Contact shadow & 3D slab edge under baseplate (ExplodedView.tsx lines 222-230)
+const s3ContactShadow = el('div', '', s3BoardRig,
+  `position:absolute;left:-20px;top:14px;width:${W3 + 40}px;height:${H3 + 40}px;border-radius:42px;background:rgba(15,23,42,0.28);filter:blur(36px);transform:translateZ(-32px) translate(28px, 36px)`
+);
+el('div', '', s3BoardRig,
+  `position:absolute;inset:0;border-radius:30px;background:#CBD5E1;border:3px solid #1E293B;transform:translateZ(-14px)`
+);
+const s3Baseplate = el('div', '', s3BoardRig,
+  `position:absolute;inset:0;border-radius:30px;background:linear-gradient(160deg,#F8FAFC 0%,#E2E8F0 100%);border:4px solid #1E293B;overflow:hidden`
+);
+const s3Sheen = el('div', '', s3Baseplate,
+  `position:absolute;inset:0;pointer-events:none;opacity:0`
+);
+
+const S3_LAYERS = [
+  {
+    key: 'nav', x: 24, y: 112, w: 280, h: 644, z: 120, r: 22, side: 'L', col: '#1E293B',
+    label: { n: '01', t: '抛弃纸面应试榜', d: '剔除 MMLU/GPQA 刷题水分', c: '#E63946' },
+    html: `<div style="padding:22px;height:100%;background:#0F172A;color:#F8FAFC;display:flex;flex-direction:column;justify-content:space-between">
+      <div>
+        <div class="mono" style="font:800 15px/1 'JetBrains Mono';color:#FF5A36">BENCHMARK FILTER</div>
+        <div style="font:900 26px/1.2 'Alibaba PuHuiTi';margin-top:8px">实战评测五维沙盘</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px;font:700 19px/1 'Alibaba PuHuiTi'">
+        <div style="padding:12px;border-radius:12px;background:#7F1D1D;color:#FCA5A5;text-decoration:line-through">✗ MMLU 刷题榜 92%</div>
+        <div style="padding:12px;border-radius:12px;background:#1E293B;color:#38BDF8;border:2px solid #38BDF8">✓ 01 复杂工程架构</div>
+        <div style="padding:12px;border-radius:12px;background:#1E293B;color:#60A5FA">✓ 02 2M 多模态吞吐</div>
+        <div style="padding:12px;border-radius:12px;background:#1E293B;color:#34D399">✓ 03 深度调研+语音</div>
+      </div>
+      <div class="mono" style="font:700 14px/1 'JetBrains Mono';color:#94A3B8">EXPLODED_VIEW // 5 LAYERS</div>
+    </div>`
+  },
+  {
+    key: 'claude', x: 328, y: 430, w: 490, h: 326, z: 230, r: 22, side: 'L', col: '#D97757',
+    label: { n: '02', t: 'Claude 4.6 工程层', d: '跨文件代码重构 + 零AI味长文', c: '#D97757' },
+    html: `<div style="padding:22px;height:100%;background:#FFFFFF;border:4px solid #D97757;border-radius:22px;display:flex;flex-direction:column;justify-content:space-between">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font:900 28px/1 'Inter';color:#0F172A">Claude 4.6 Opus</span>
+        <span style="padding:6px 12px;border-radius:99px;background:#FFF7ED;color:#D97757;font:900 17px/1 'Alibaba PuHuiTi'">代码 & 文稿之王</span>
+      </div>
+      <div class="mono" style="padding:14px;border-radius:14px;background:#0F172A;color:#E2E8F0;font-size:16px">
+        <div style="color:#FB923C;font-weight:800">&gt; claude-code --architect</div>
+        <div style="color:#4ADE80;margin-top:6px">✓ 24 modules refactored (0 bugs)</div>
+      </div>
+      <div style="font:800 20px/1 'Alibaba PuHuiTi';color:#B45309">👉 写核心代码 / 深度长文必选</div>
+    </div>`
+  },
+  {
+    key: 'gemini', x: 840, y: 430, w: 496, h: 326, z: 340, r: 22, side: 'R', col: '#3186FF',
+    label: { n: '03', t: 'Gemini 3.1 多模态层', d: '2M超长上下文 + 原生4K视频拉片', c: '#3186FF' },
+    html: `<div style="padding:22px;height:100%;background:#FFFFFF;border:4px solid #3186FF;border-radius:22px;display:flex;flex-direction:column;justify-content:space-between">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font:900 28px/1 'Inter';color:#0F172A">Gemini 3.1 Pro</span>
+        <span style="padding:6px 12px;border-radius:99px;background:#EFF6FF;color:#3186FF;font:900 17px/1 'Alibaba PuHuiTi'">2M 巨兽吞吐</span>
+      </div>
+      <div class="mono" style="padding:14px;border-radius:14px;background:#0F172A;color:#E2E8F0;font-size:16px">
+        <div style="color:#60A5FA;font-weight:800">RAW_4K_VIDEO.MP4 (2,000,000 TOK)</div>
+        <div style="color:#34D399;margin-top:6px">✓ 原生逐帧看懂画面构图与镜头语言</div>
+      </div>
+      <div style="font:800 20px/1 'Alibaba PuHuiTi';color:#1D4ED8">👉 喂海量大文件 / 视频拉片必选</div>
+    </div>`
+  },
+  {
+    key: 'gpt', x: 328, y: 112, w: 1008, h: 294, z: 450, r: 22, side: 'R', col: '#10A37F',
+    label: { n: '04', t: 'GPT-5.4 全能Agent层', d: 'DeepResearch全网调研 + 满血实时语音', c: '#10A37F' },
+    html: `<div style="padding:22px 26px;height:100%;background:#FFFFFF;border:4px solid #10A37F;border-radius:22px;display:flex;flex-direction:column;justify-content:space-between">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font:900 28px/1 'Inter';color:#0F172A">ChatGPT (GPT-5.4) · 六边形全能日常管家</span>
+        <span style="padding:6px 14px;border-radius:99px;background:#ECFDF5;color:#10A37F;font:900 18px/1 'Alibaba PuHuiTi'">DeepResearch + 实时语音</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div class="mono" style="padding:12px 16px;border-radius:14px;background:#0F172A;color:#A7F3D0;font-size:16px">✓ 全网百篇信源交叉核验生成研报</div>
+        <div class="mono" style="padding:12px 16px;border-radius:14px;background:#0F172A;color:#FDE047;font-size:16px">✓ 超低延迟打断倾听 + Python 分析 Excel</div>
+      </div>
+      <div style="font:800 20px/1 'Alibaba PuHuiTi';color:#047857">👉 跑全自动深度调研 / 日常高频语音助理必选</div>
+    </div>`
+  },
+  {
+    key: 'top', x: 24, y: 20, w: 1312, h: 74, z: 560, r: 18, side: 'R', col: '#FF5A36',
+    label: { n: '05', t: '3B1B 场景路由顶栏', d: '从真实工作流出发对号入座', c: '#FF5A36' },
+    html: `<div style="padding:0 26px;height:100%;background:#1D2731;border:3px solid #FF5A36;border-radius:18px;display:flex;align-items:center;justify-content:space-between;color:#FFFFFF">
+      <div style="display:flex;align-items:center;gap:14px">
+        <span style="padding:5px 12px;border-radius:8px;background:#FF5A36;font:900 16px/1 'JetBrains Mono'">REAL WORKFLOW OS</span>
+        <span style="font:900 24px/1 'Alibaba PuHuiTi'">抛开枯燥跑分榜单 · 直接从真实生产力场景对号入座</span>
+      </div>
+      <span class="mono" style="font:800 18px/1 'JetBrains Mono';color:#FBBF24">⌘K SCENE_MATCH_READY</span>
+    </div>`
+  }
+].map((ly, i) => {
+  // Dashed slot on baseplate
+  const slot = el('div', '', s3Baseplate,
+    `position:absolute;left:${ly.x + 6}px;top:${ly.y + 6}px;width:${ly.w - 12}px;height:${ly.h - 12}px;border-radius:${ly.r}px;border:3px dashed ${ly.col}66;background:${ly.col}08`
+  );
+  // Shadow cast onto baseplate
+  const sh = el('div', '', s3BoardRig,
+    `position:absolute;left:${ly.x}px;top:${ly.y}px;width:${ly.w}px;height:${ly.h}px;border-radius:${ly.r}px;background:rgba(15,23,42,0.28);transform:translateZ(1px);opacity:0`
+  );
+  // 3D Thickness slab behind lifted layer
+  const edge = el('div', '', s3BoardRig,
+    `position:absolute;left:${ly.x}px;top:${ly.y}px;width:${ly.w}px;height:${ly.h}px;border-radius:${ly.r}px;background:#94A3B8;opacity:0`
+  );
+  // Layer body
+  const body = el('div', '', s3BoardRig,
+    `position:absolute;left:${ly.x}px;top:${ly.y}px;width:${ly.w}px;height:${ly.h}px;border-radius:${ly.r}px;overflow:hidden`
+  );
+  body.innerHTML = ly.html;
+  return { ...ly, i, slot, sh, edge, body };
+});
+
+// 3D-Projected Callouts SVG & Labels (ExplodedView.tsx Callouts)
+const s3CalloutSvg = sv('svg', { width: 1920, height: 1080, style: 'position:absolute;inset:0;overflow:visible' }, scene3);
+const s3CalloutDom = el('div', '', scene3, 'position:absolute;inset:0');
+const S3_CALLOUTS = S3_LAYERS.map((ly, i) => {
+  const poly = sv('polyline', {
+    fill: 'none', stroke: ly.label.c, 'stroke-width': 3.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0
+  }, s3CalloutSvg);
+  const dot = sv('circle', { r: 7, fill: '#FFFFFF', stroke: ly.label.c, 'stroke-width': 4, opacity: 0 }, s3CalloutSvg);
+  const tag = el('div', 'stk', s3CalloutDom,
+    `width:340px;padding:12px 18px;border-radius:16px;background:#FFFFFF;border:3px solid ${ly.label.c};box-shadow:0 10px 24px rgba(15,23,42,.14);opacity:0`,
+    `<div class="mono" style="font:800 14px/1 'JetBrains Mono';color:${ly.label.c}">LAYER ${ly.label.n} // 实战维度</div>
+     <div style="font:900 22px/1.2 'Alibaba PuHuiTi';color:#0F172A;margin-top:4px">${ly.label.t}</div>
+     <div style="font:700 16px/1.2 'Alibaba PuHuiTi';color:#64748B;margin-top:3px">${ly.label.d}</div>`
+  );
+  return { ly, poly, dot, tag, side: ly.side };
+});
+
+function camAt3(t) {
+  const orbit = ramp(t, 10.65, 2.80, EASE.smooth);
+  const tall = ramp(t, 10.45, 0.90, EASE.smooth) * (1 - ramp(t, 13.55, 0.68, EASE.smooth));
+  return {
+    rx: mix(52, 46, orbit),
+    rz: mix(-30, -18, orbit),
+    s: mix(0.65, 0.55, tall),
+    cx: mix(0, 20, orbit),
+    cy: mix(10, 108, tall)
+  };
+}
+function project3(c, px, py, pz) {
+  const X = px - W3 / 2, Y = py - H3 / 2;
+  const a = (c.rz * Math.PI) / 180, b = (c.rx * Math.PI) / 180;
+  const x1 = X * Math.cos(a) - Y * Math.sin(a);
+  const y1 = X * Math.sin(a) + Y * Math.cos(a);
+  const y2 = y1 * Math.cos(b) - pz * Math.sin(b);
+  const z2 = y1 * Math.sin(b) + pz * Math.cos(b);
+  const x4 = x1 * c.s + c.cx, y4 = y2 * c.s + c.cy;
+  const k = PERSP3 / Math.max(200, PERSP3 - z2);
+  return { x: 960 + x4 * k, y: 486 + y4 * k };
+}
+
+function updateScene3(t) {
+  if (t < 10.25 || t >= 14.72) { scene3.style.display = 'none'; return; }
+  scene3.style.display = 'block';
+
+  const cam = camAt3(t);
+  // Reverse slam assembly at t = 13.58s..14.18s, thud at 14.16s
+  const sinceClose = t - 14.16;
+  const thud = sinceClose >= 0 ? 10 * Math.exp(-sinceClose * 9) * Math.cos(sinceClose * 26) : 0;
+
+  s3BoardRig.style.transform =
+    `translate(${cam.cx.toFixed(1)}px, ${(cam.cy + thud).toFixed(1)}px) scale(${cam.s.toFixed(4)}) rotateX(${cam.rx.toFixed(2)}deg) rotateZ(${cam.rz.toFixed(2)}deg)`;
+
+  // Sheen sweep across assembled board (14.16s -> 14.60s)
+  const sheenP = ramp(t, 14.16, 0.44, EASE.swift);
+  if (sheenP > 0 && sheenP < 1) {
+    const pos = -20 + 140 * sheenP;
+    s3Sheen.style.opacity = '1';
+    s3Sheen.style.background = `linear-gradient(108deg, transparent ${pos - 18}%, rgba(255,255,255,0.75) ${pos}%, transparent ${pos + 18}%)`;
+  } else {
+    s3Sheen.style.opacity = '0';
+  }
+
+  S3_LAYERS.forEach((ly, i) => {
+    const up = spring(t - (10.50 + i * 0.11), 2.3, 0.42);
+    const down = ramp(t, 13.55 + (4 - i) * 0.08, 0.36, EASE.exit);
+    const p = Math.max(0, up * (1 - down));
+    const z = ly.z * p + 2;
+
+    ly.body.style.transform = `translateZ(${z.toFixed(1)}px)`;
+    if (p > 0.03) {
+      ly.edge.style.opacity = '1';
+      ly.edge.style.transform = `translateZ(${Math.max(1, z - 8).toFixed(1)}px)`;
+      ly.sh.style.opacity = (Math.min(1, p * 1.4) * (0.75 - z / 1200)).toFixed(3);
+      ly.sh.style.transform = `translate3d(${(z * 0.16).toFixed(1)}px, ${(z * 0.24).toFixed(1)}px, 1px)`;
+      ly.sh.style.filter = `blur(${(10 + z * 0.08).toFixed(1)}px)`;
+    } else {
+      ly.edge.style.opacity = '0';
+      ly.sh.style.opacity = '0';
+    }
+
+    // 3D-Projected Callouts (visible during hover 10.95s - 13.55s)
+    const callIn = ramp(t, 10.95 + i * 0.12, 0.30, EASE.out) * (1 - ramp(t, 13.40, 0.22, EASE.exit));
+    const cItem = S3_CALLOUTS[i];
+    if (callIn > 0.02) {
+      const anchorX = ly.side === 'L' ? ly.x : ly.x + ly.w;
+      const anchorY = ly.y + ly.h / 2;
+      const pt = project3(cam, anchorX, anchorY, z);
+      const colX = ly.side === 'L' ? 420 : 1500;
+      const targetY = ly.side === 'L' ? (i === 0 ? 310 : 620) : (i === 4 ? 210 : i === 3 ? 440 : 690);
+      const elbowX = ly.side === 'L' ? colX + 45 : colX - 45;
+
+      cItem.poly.setAttribute('points', `${pt.x.toFixed(1)},${pt.y.toFixed(1)} ${elbowX.toFixed(1)},${targetY.toFixed(1)} ${colX.toFixed(1)},${targetY.toFixed(1)}`);
+      cItem.poly.setAttribute('opacity', callIn.toFixed(3));
+      cItem.dot.setAttribute('cx', pt.x.toFixed(1));
+      cItem.dot.setAttribute('cy', pt.y.toFixed(1));
+      cItem.dot.setAttribute('opacity', callIn.toFixed(3));
+
+      const tagX = ly.side === 'L' ? colX - 350 : colX + 12;
+      cItem.tag.style.opacity = callIn.toFixed(3);
+      cItem.tag.style.transform = `translate(${tagX.toFixed(1)}px, ${(targetY - 46 + (1 - callIn) * 14).toFixed(1)}px)`;
+    } else {
+      cItem.poly.setAttribute('opacity', '0');
+      cItem.dot.setAttribute('opacity', '0');
+      cItem.tag.style.opacity = '0';
+    }
+  });
+}
+
+// ============================================================================
+// 7. SCENE 4 (14.20s - 18.00s):
+//    Recipe: video-shotcraft SceneOpen.tsx (PageCam 3D Card Levitation + Perimeter Dual-Lap Laser Beam)
+//            + remotion-video-skill 3B1B SlidingWindow & ValueFlyIn + R1 Hero Hold (16.15s - 18.00s)
+// ============================================================================
+const s4Persp = el('div', '', scene4, 'position:absolute;inset:0;perspective:1800px;overflow:hidden');
+const s4Stage = el('div', '', s4Persp,
+  'position:absolute;left:0;top:0;width:1920px;height:1080px;transform-style:preserve-3d;transform-origin:960px 540px'
+);
+
+const S4_MODELS = [
+  {
+    id: 'gemini', name: 'Gemini 3.1 Pro', maker: 'GOOGLE · 多模态巨兽',
+    col: '#3186FF', dark: '#1D4ED8', bg: '#EFF6FF', x: 370, y: 515,
+    scene: '数 G 原生视频拉片 + 2M 百万代码库吞吐',
+    metrics: ['2,000,000 Tokens 零截断', '原生逐帧理解 4K 视频与长音频', 'Google Workspace 深度联动'],
+    verdict: '👉 喂海量大文件 / 视频必选'
+  },
+  {
+    id: 'claude', name: 'Claude 4.6 Opus', maker: 'ANTHROPIC · 代码与文字工匠',
+    col: '#D97757', dark: '#B45309', bg: '#FFF7ED', x: 960, y: 515,
+    scene: '跨文件复杂工程重构 + 去 AI 味深度长文',
+    metrics: ['Claude Code 终端独立接管工程', '前端 UI / 架构审美断崖式第一', '文笔克制细腻、口播稿免大改'],
+    verdict: '👉 写核心代码 / 深度长文必选'
+  },
+  {
+    id: 'chatgpt', name: 'ChatGPT (GPT-5.4)', maker: 'OPENAI · 六边形全能管家',
+    col: '#10A37F', dark: '#047857', bg: '#ECFDF5', x: 1550, y: 515,
+    scene: 'DeepResearch 全网调研 + 满血实时语音',
+    metrics: ['全网自动交叉核验百篇信源', '超低延迟情绪化实时语音陪练', 'Python 沙盒画图与 Excel 分析'],
+    verdict: '👉 跑全自动调研 / 日常管家必选'
+  }
+].map((m, i) => {
+  const cw = 524, ch = 590;
+  // Vacated slot on the board (SceneOpen.tsx lines 240-258)
+  const slot = el('div', '', s4Stage,
+    `position:absolute;left:${m.x - cw / 2}px;top:${m.y - ch / 2}px;width:${cw}px;height:${ch}px;border-radius:36px;background:rgba(15,23,42,0.05);border:3px dashed ${m.col}`
+  );
+  // Levitating 3D Card Container
+  const wrap = el('div', '', s4Stage,
+    `position:absolute;left:${m.x - cw / 2}px;top:${m.y - ch / 2}px;width:${cw}px;height:${ch}px;transform-style:preserve-3d`
+  );
+  wrap.setAttribute('data-box', `s4-card-${i}`);
+
+  // 2.5D Keycap Bevel Base + Top Surface
+  const cardInner = el('div', '', wrap,
+    `position:absolute;inset:0;border-radius:36px;background:#FFFFFF;border:6px solid ${m.col};padding:28px 30px;display:flex;flex-direction:column;justify-content:space-between`
+  );
+  cardInner.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div class="mono" style="font:800 16px/1 'JetBrains Mono';color:${m.col};letter-spacing:.1em">${m.maker}</div>
+        <div class="num" style="font:900 42px/1.15 'Inter';color:#0F172A;margin-top:8px">${m.name}</div>
+      </div>
+      <div style="width:86px;height:86px;border-radius:22px;background:${m.bg};border:3px solid ${m.col};display:flex;align-items:center;justify-content:center">
+        ${LOGO_SVG[m.id](62)}
+      </div>
+    </div>
+    <div style="padding:14px 18px;border-radius:16px;background:${m.bg};font:900 23px/1.25 'Alibaba PuHuiTi';color:${m.dark}">
+      🎯 主场：${m.scene}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px;padding:16px 18px;border-radius:18px;background:#0F172A;color:#F8FAFC;font:700 20px/1.3 'Alibaba PuHuiTi'">
+      ${m.metrics.map(item => `<div style="display:flex;align-items:center;gap:10px"><span style="color:${m.col};font-weight:900">✦</span><span>${item}</span></div>`).join('')}
+    </div>
+    <div class="s4-verdict" style="padding:16px 20px;border-radius:18px;background:${m.col};color:#FFFFFF;font:900 26px/1 'Alibaba PuHuiTi';text-align:center;box-shadow:0 10px 24px ${m.col}55">
+      ${m.verdict}
+    </div>
+  `;
+
+  // SceneOpen.tsx Perimeter Laser Beam SVG around the card outline
+  const beamSvg = sv('svg', {
+    width: cw + 16, height: ch + 16,
+    style: 'position:absolute;left:-8px;top:-8px;pointer-events:none;overflow:visible'
+  }, wrap);
+  const beamRect = sv('rect', {
+    x: 4, y: 4, width: cw + 8, height: ch + 8, rx: 40, ry: 40,
+    fill: 'none', stroke: '#FF5A36', 'stroke-width': 7, 'stroke-linecap': 'round',
+    pathLength: 1, 'stroke-dasharray': '0.28 0.72', 'stroke-dashoffset': 0, opacity: 0
+  }, beamSvg);
+
+  return { ...m, cw, ch, slot, wrap, cardInner, beamRect, verdictEl: cardInner.querySelector('.s4-verdict') };
+});
+
+function updateScene4(t) {
+  if (t < 14.20) { scene4.style.display = 'none'; return; }
+  scene4.style.display = 'block';
+
+  // video-shotcraft R1 Hero Hold: after 16.15s, freeze card motion and do subtle 1.5% camera push
+  const isHold = t >= 16.15;
+  const enterU = ramp(t, 14.20, 0.75, EASE.fly);
+  const holdCreep = ramp(t, 16.15, 1.85, EASE.smooth);
+  const rotX = mix(18, 0, enterU);
+  const rotY = mix(-12, 0, enterU);
+  const scale = mix(0.88, 1.0, enterU) * (1 + 0.015 * holdCreep);
+
+  s4Stage.style.transform = `scale(${scale.toFixed(4)}) rotateX(${rotX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
+
+  const tAnim = Math.min(t, 16.15);
+  S4_MODELS.forEach((m, i) => {
+    const rise = ramp(tAnim, 14.30 + i * 0.14, 0.45, EASE.overshoot);
+    const settle = ramp(tAnim, 15.65 + i * 0.08, 0.40, EASE.out);
+    const lift = rise * (1 - 0.55 * settle);
+    const z = 75 * lift;
+
+    m.wrap.style.transform = `translateZ(${z.toFixed(1)}px)`;
+    m.cardInner.style.boxShadow = `0 ${(12 + 24 * lift).toFixed(1)}px ${(28 + 40 * lift).toFixed(1)}px rgba(15,23,42,${(0.16 + 0.14 * lift).toFixed(3)})`;
+
+    // Perimeter laser beam sweeps around card i during its spotlight window
+    const bStart = 14.45 + i * 0.42;
+    const bProg = clamp01((t - bStart) / 0.55);
+    if (bProg > 0 && bProg < 1 && !isHold) {
+      m.beamRect.setAttribute('opacity', '1');
+      m.beamRect.setAttribute('stroke-dashoffset', (-bProg).toFixed(3));
+    } else {
+      m.beamRect.setAttribute('opacity', '0');
+    }
+
+    const vPop = popSS(tAnim, 14.55 + i * 0.35, 2.8, 0.36, 0.14);
+    m.verdictEl.style.opacity = vPop.o;
+    m.verdictEl.style.transform = `scale(${(vPop.sx || 1).toFixed(3)}, ${(vPop.sy || 1).toFixed(3)})`;
+  });
+}
+
+// ============================================================================
+// 8. MASTER FRAME CONTROLLER: window.setVideoTime(t) & window.renderAt(t)
+// ============================================================================
+const FLASH_CUT_TIMES = [4.40, 9.60, 14.20];
+
+window.setVideoTime = function(tRaw) {
+  const t = clamp(Number(tRaw) || 0, 0, 18.0);
+
+  // 1. Update active scene
+  updateScene1(t);
+  updateScene2(t);
+  updateScene3(t);
+  updateScene4(t);
+
+  // 2. Warm FlashCut straddling scene transitions (video-shotcraft FlashCut.tsx)
+  let flashAlpha = 0;
+  FLASH_CUT_TIMES.forEach(cutT => {
+    const dt = Math.abs(t - cutT);
+    if (dt < 0.14) flashAlpha = Math.max(flashAlpha, (1 - dt / 0.14) * 0.55);
+  });
+  flashCut.style.opacity = flashAlpha.toFixed(3);
+
+  // 3. Top Header & Telemetry Recipe Readout
+  if (t < 4.40) {
+    topPhaseTxt.textContent = t < 1.25
+      ? '01 过去：死磕同一张跑分卷 · 同质化内卷'
+      : '01 3D 翻面进化中枢 · 三大巨头分道扬镳';
+    teleRecipe.textContent = 'RECIPE: KEYCAP_SMASH + HUB_FLIP_3D';
+  } else if (t < 9.60) {
+    topPhaseTxt.textContent = t < 7.10
+      ? '02 3D 空间终端巡航 · 盲目全订浪费预算'
+      : '02 3D 空间终端巡航 · 错误工具绕路 vs 光纤直达';
+    teleRecipe.textContent = 'RECIPE: TERMINAL_3D + INVERSE_CAM';
+  } else if (t < 14.20) {
+    topPhaseTxt.textContent = '03 3/4 轴测五层 3D 爆炸分解图 · 真实生产力沙盘';
+    teleRecipe.textContent = 'RECIPE: EXPLODED_VIEW_3D + CALLOUTS';
+  } else {
+    topPhaseTxt.textContent = t >= 16.15
+      ? '04 三大顶流终极选型指南 · SHOTCRAFT R1 定格'
+      : '04 3D 悬浮卡片激光扫描 · 真实场景对号入座';
+    teleRecipe.textContent = 'RECIPE: PAGECAM_LEVITATE + R1_HOLD';
+  }
+
+  // 4. Bottom Subtitle & Spark-Fuse
+  const cap = CAPTIONS.find(c => t >= c[0] && t < c[1]) || CAPTIONS[CAPTIONS.length - 1];
+  if (subTxt.innerHTML !== cap[2]) subTxt.innerHTML = cap[2];
+  subTime.textContent = `${t.toFixed(1).padStart(4, '0')}s / 18.0s`;
+  fuseFill.style.width = `${((t / 18.0) * 100).toFixed(2)}%`;
+};
+
+window.DEMO = { width: 1920, height: 1080, fps: 30, duration: 18.0 };
+window.renderAt = async function(t) { window.setVideoTime(t); };
+window.__ready = true;
+window.setVideoTime(0);
+</script>
+</body>
+</html>

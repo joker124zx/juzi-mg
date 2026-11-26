@@ -1,0 +1,1057 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AI 终极横评 · MG Hook (0-17s)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  html, body {
+    width: 1920px; height: 1080px; overflow: hidden;
+    background: #141B24;
+    font-family: "Alibaba PuHuiTi", "HarmonyOS Sans SC", "MiSans", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  #stage {
+    position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: hidden;
+    background: radial-gradient(120% 95% at 50% 45%, #243140 0%, #17202B 60%, #0F161E 100%);
+  }
+  #cam {
+    position: absolute; left: 0; top: 0; width: 1920px; height: 1080px;
+    will-change: filter;
+  }
+  #world {
+    position: absolute; left: 0; top: 0; width: 2400px; height: 6100px;
+    transform-origin: 0 0;
+  }
+  #bezel {
+    position: absolute; left: -120px; top: -120px; width: 2640px; height: 6340px;
+    border-radius: 260px; background: #0D131A;
+    box-shadow: 0 0 0 42px #F7F9FB, 0 80px 210px 50px rgba(4, 8, 14, 0.65);
+  }
+  #screen {
+    position: absolute; left: 0; top: 0; width: 2400px; height: 6100px;
+    border-radius: 170px; overflow: hidden;
+    background: #E9EEF2;
+  }
+  #dots {
+    position: absolute; left: -96px; top: -96px; width: 2592px; height: 6292px;
+    background-image:
+      radial-gradient(circle, #BCC8D4 2.4px, transparent 3.0px),
+      linear-gradient(to right, rgba(188,200,212,0.18) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(188,200,212,0.18) 1px, transparent 1px);
+    background-size: 48px 48px, 240px 240px, 240px 240px;
+  }
+  .a { position: absolute; left: 0; top: 0; }
+  .mask { position: absolute; overflow: hidden; }
+  .stk { position: absolute; left: 0; top: 0; transform-origin: 50% 50%; }
+  .num { font-family: "Inter", "DIN Alternate", "JetBrains Mono", "Segoe UI", sans-serif; font-feature-settings: "tnum" 1; }
+  .mono { font-family: "JetBrains Mono", "Consolas", monospace; }
+  #fx, #hud {
+    position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <!-- Directional + Radial Camera Motion Blur Filter + Distressed Rubber Stamp Ink Filter (pdoom-video bureau.ts) -->
+  <svg width="0" height="0" style="position:absolute">
+    <filter id="mbf" x="-8%" y="-8%" width="116%" height="116%" color-interpolation-filters="sRGB">
+      <feGaussianBlur id="mbg" in="SourceGraphic" stdDeviation="0 0" edgeMode="duplicate"/>
+    </filter>
+    <filter id="stampInk" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="3" seed="17" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="3.5" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </svg>
+
+  <div id="cam">
+    <div id="world">
+      <div id="bezel"></div>
+      <div id="screen">
+        <div id="dots"></div>
+        <!-- Ambient floating geometric shapes layer -->
+        <svg id="bgDeco" class="a" width="2400" height="6100" style="overflow:visible;pointer-events:none"></svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- Screen-space graphic match overlay & HUD -->
+  <svg id="fxSvg" class="a" width="1920" height="1080" style="pointer-events:none;overflow:visible"></svg>
+  <div id="fx"></div>
+  <div id="hud"></div>
+</div>
+
+<script type="module">
+const cues = await fetch('./cues.json').then(r => r.json());
+const EV = cues.ev, CAM = cues.cam, WW = cues.world.w, WH = cues.world.h;
+window.DEMO = { width: 1920, height: 1080, fps: 30, duration: cues.duration };
+
+// ==================== MATH & MG PHYSICS LIBRARY ====================
+const clamp = (x, a = 0, b = 1) => x < a ? a : x > b ? b : x;
+const lerp = (a, b, u) => a + (b - a) * u;
+const P = (t, a, d) => clamp((t - a) / d);
+const oC = u => 1 - Math.pow(1 - u, 3);
+const oQ = u => 1 - Math.pow(1 - u, 4);
+const oX = u => u >= 1 ? 1 : 1 - Math.pow(2, -10 * u);
+const iQ = u => u * u;
+const ioC = u => u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const ioS = u => -(Math.cos(Math.PI * u) - 1) / 2;
+const oB = (u, s = 1.70158) => 1 + (s + 1) * Math.pow(u - 1, 3) + s * Math.pow(u - 1, 2);
+
+function bez(x1, y1, x2, y2) {
+  return u => {
+    if (u <= 0) return 0;
+    if (u >= 1) return 1;
+    let t = u;
+    for (let i = 0; i < 8; i++) {
+      const cx = 3 * x1 * t * (1 - t) ** 2 + 3 * x2 * t * t * (1 - t) + t ** 3 - u;
+      const d = 3 * x1 * (1 - t) ** 2 + 6 * (x2 - x1) * t * (1 - t) + 3 * (1 - x2) * t * t;
+      if (Math.abs(d) < 1e-6) break;
+      t = clamp(t - cx / d);
+    }
+    return 3 * y1 * t * (1 - t) ** 2 + 3 * y2 * t * t * (1 - t) + t ** 3;
+  };
+}
+const eFly = bez(0.62, 0, 0.18, 1);
+const ePop = bez(0.34, 1.56, 0.64, 1);
+
+// Damped cosine wobble (impulse response)
+const wob = (dt, f = 4.8, k = 10.5) => dt < 0 ? 0 : Math.exp(-k * dt) * Math.cos(2 * Math.PI * f * dt);
+
+// Closed-form spring & velocity for Squash & Stretch (from 01-flat-vector)
+function spring(t, f = 2.6, z = 0.38) {
+  if (t <= 0) return 0;
+  const w = 2 * Math.PI * f, a = z * w, b = w * Math.sqrt(1 - z * z);
+  return 1 - Math.exp(-a * t) * (Math.cos(b * t) + (a / b) * Math.sin(b * t));
+}
+function springV(t, f = 2.6, z = 0.38) {
+  if (t <= 0) return 0;
+  const w = 2 * Math.PI * f, a = z * w, b = w * Math.sqrt(1 - z * z);
+  return Math.exp(-a * t) * (w * w / b) * Math.sin(b * t);
+}
+function popSS(t, t0, f = 2.6, z = 0.38, amt = 0.14) {
+  const dt = t - t0;
+  if (dt <= 0) return { s: 0, sx: 0, sy: 0, o: 0 };
+  const s = spring(dt, f, z);
+  const k = clamp(springV(dt, f, z) / (2 * Math.PI * f) * amt * 2, -0.28, 0.28);
+  return { s, sx: s * (1 - k * 0.65), sy: s * (1 + k), o: clamp(dt * 12) };
+}
+
+// Sticker slap physics: hovers large & tilted with deep shadow -> slams down -> damped wobble
+function slap(t, land, dur = 0.18, amp = 0.34, tilt = 7) {
+  const p = (t - (land - dur)) / dur;
+  if (p < 0) return { o: 0, s: 1 + amp, sx: 1 + amp, sy: 1 + amp, r: tilt, lift: 1 };
+  if (p < 1) {
+    const L = 1 - iQ(p);
+    return { o: clamp(p * 5), s: 1 + amp * L, sx: 1 + amp * L, sy: 1 + amp * L, r: tilt * L, lift: L };
+  }
+  const w = wob(t - land, 4.6, 10);
+  return { o: 1, s: 1 - 0.04 * w, sx: 1 + 0.045 * w, sy: 1 - 0.055 * w, r: -0.9 * w, lift: 0 };
+}
+
+const shadow = (lift, base = 0.26) =>
+  `drop-shadow(0 ${(7 + 32 * lift).toFixed(1)}px ${(12 + 34 * lift).toFixed(1)}px rgba(18, 28, 40, ${(base - 0.07 * lift).toFixed(3)}))`;
+
+// DOM & SVG builders
+const world = document.getElementById('world');
+const screen = document.getElementById('screen');
+const bgDeco = document.getElementById('bgDeco');
+const fxSvg = document.getElementById('fxSvg');
+const fx = document.getElementById('fx');
+const hud = document.getElementById('hud');
+const SVGNS = 'http://www.w3.org/2000/svg';
+
+function el(tag, cls, parent, css, html) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (css) e.style.cssText = css;
+  if (html != null) e.innerHTML = html;
+  (parent || screen).appendChild(e);
+  return e;
+}
+function sv(tag, attrs, parent) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  (parent || screen).appendChild(e);
+  return e;
+}
+
+const U = []; // Frame updaters: fn(t, C, W)
+
+// ==================== CAMERA & WORLD MATRIX ====================
+function cam(t) {
+  if (t <= CAM[0].t) return { ...CAM[0] };
+  for (let i = 1; i < CAM.length; i++) {
+    const a = CAM[i - 1], b = CAM[i];
+    if (t <= b.t) {
+      const u = clamp((t - a.t) / (b.t - a.t));
+      const e = b.move === 'fly' ? eFly(u) : ioS(u);
+      return {
+        x: lerp(a.x, b.x, e),
+        y: lerp(a.y, b.y, e),
+        z: Math.exp(lerp(Math.log(a.z), Math.log(b.z), e)),
+        r: lerp(a.r || 0, b.r || 0, e)
+      };
+    }
+  }
+  return { ...CAM[CAM.length - 1] };
+}
+
+// Camera impact jolts on major sticker/stamp slams
+function jolt(t) {
+  return (
+    7 * wob(t - EV.host_land, 4.5, 16) +
+    6 * wob(t - EV.cards_land[0], 4.5, 16) +
+    6 * wob(t - EV.cards_land[1], 4.5, 16) +
+    6 * wob(t - EV.cards_land[2], 4.5, 16) +
+    5 * wob(t - EV.bill_land, 4.5, 16) +
+    14 * wob(t - EV.stamp_slam, 5.2, 12) +
+    6 * wob(t - EV.hero_banner, 4.2, 15)
+  );
+}
+
+function worldM(t, C) {
+  const J = jolt(t);
+  const k = C.z, a = (C.r || 0) * Math.PI / 180;
+  const cos = Math.cos(a), sin = Math.sin(a);
+  const bx = -C.x * k * cos + C.y * k * sin;
+  const by = -C.x * k * sin - C.y * k * cos;
+  return {
+    m: [k * cos, k * sin, -k * sin, k * cos, 960 + bx, 540 + by + J],
+    J
+  };
+}
+const mapW = (M, x, y) => [M[0] * x + M[2] * y + M[4], M[1] * x + M[3] * y + M[5]];
+
+// ==================== AMBIENT LIVING BACKGROUND (ZERO DEAD FRAMES) ====================
+const DECO_ITEMS = [
+  { x: 240, y: 280, kind: 'plus', c: '#FF5A36', s: 1.1 },
+  { x: 2150, y: 360, kind: 'ring', c: '#3186FF', s: 1.3 },
+  { x: 2080, y: 980, kind: 'plus', c: '#25313D', s: 0.9 },
+  { x: 210, y: 1750, kind: 'ring', c: '#3186FF', s: 1.2 },
+  { x: 2190, y: 1820, kind: 'tri', c: '#D97757', s: 1.2 },
+  { x: 180, y: 2560, kind: 'plus', c: '#10A37F', s: 1.1 },
+  { x: 2210, y: 2620, kind: 'ring', c: '#FF5A36', s: 1.0 },
+  { x: 220, y: 3420, kind: 'tri', c: '#E63946', s: 1.2 },
+  { x: 2180, y: 3980, kind: 'plus', c: '#25313D', s: 1.1 },
+  { x: 210, y: 4860, kind: 'ring', c: '#D97757', s: 1.3 },
+  { x: 2200, y: 5020, kind: 'tri', c: '#10A37F', s: 1.2 },
+].map((d, i) => {
+  const g = sv('g', { opacity: '0.32' }, bgDeco);
+  if (d.kind === 'plus') {
+    sv('path', { d: 'M-18 0 H18 M0 -18 V18', stroke: d.c, 'stroke-width': 7, 'stroke-linecap': 'round' }, g);
+  } else if (d.kind === 'ring') {
+    sv('circle', { cx: 0, cy: 0, r: 22, fill: 'none', stroke: d.c, 'stroke-width': 7 }, g);
+  } else {
+    sv('path', { d: 'M0 -22 L20 14 L-20 14 Z', fill: 'none', stroke: d.c, 'stroke-width': 6, 'stroke-linejoin': 'round' }, g);
+  }
+  return { ...d, g, phase: i * 1.37 };
+});
+
+// Top tablet status bar details
+el('div', 'a mono', screen, 'left:140px;top:46px;font:800 38px/1 "Inter",monospace;color:#25313D;letter-spacing:.04em', 'AI-BENCH // WORKFLOW.OS');
+el('div', 'a mono', screen, 'left:1920px;top:48px;font:700 32px/1 "Inter",monospace;color:#5E6D7B', '60FPS · MGAUDIO');
+
+// ==================== ZONE A (0.00s - 1.84s): 每天都有人问我 ====================
+// 1. Terminal Cursor Morph -> Articulated Sticker Creator Character (12px white die-cut outline)
+const HOST_POS = { x: 330, y: 960 };
+const termPrompt = el('div', 'a mono', screen,
+  `left:${HOST_POS.x - 140}px;top:${HOST_POS.y - 380}px;padding:18px 28px;background:#1A2430;border-radius:20px;border:8px solid #F7F9FB;color:#FF5A36;font:900 54px/1 monospace;box-shadow:0 16px 36px rgba(18,28,40,.28);transform-origin:50% 50%`,
+  `&gt; ask_ai<span style="display:inline-block;width:28px;height:52px;background:#FF5A36;vertical-align:-8px;margin-left:10px"></span>`
+);
+
+function buildStickerHost() {
+  const OW = 13, SK = '#F6C8A4', HR = '#1E2936', HD = '#2E5BFF', HD2 = '#1E40AF', PT = '#25313D', ACC = '#FF5A36';
+  const G = { body: [], arm: [], head: [] };
+  const S = (g, tag, at, fill, o = {}) => G[g].push({ tag, at, fill, ...o });
+
+  // Legs & sneakers
+  S('body', 'rect', { x: -42, y: -118, width: 34, height: 102, rx: 14 }, PT);
+  S('body', 'rect', { x: 8, y: -118, width: 34, height: 102, rx: 14 }, PT);
+  S('body', 'rect', { x: -58, y: -26, width: 52, height: 26, rx: 12 }, ACC);
+  S('body', 'rect', { x: 6, y: -26, width: 52, height: 26, rx: 12 }, ACC);
+  // Left resting arm
+  S('body', 'path', { d: 'M -66 -232 L -108 -172 L -88 -126', fill: 'none' }, null, { st: HD2, sw: 32 });
+  S('body', 'circle', { cx: -88, cy: -122, r: 17 }, SK);
+  // Hoodie torso
+  S('body', 'path', { d: 'M -64 -244 C -78 -244 -86 -232 -88 -216 L -98 -114 C -100 -98 -88 -90 -72 -90 L 72 -90 C 88 -90 100 -98 98 -114 L 88 -216 C 86 -232 78 -244 64 -244 Z' }, HD);
+  // Hoodie pocket & AI terminal badge on chest
+  S('body', 'path', { d: 'M -46 -150 L 46 -150 L 54 -104 L -54 -104 Z' }, HD2, { nosil: 1 });
+  S('body', 'rect', { x: -34, y: -214, width: 68, height: 42, rx: 9 }, '#0F172A', { nosil: 1 });
+  S('body', 'path', { d: 'M -18 -198 L -8 -192 L -18 -186 M -2 -186 H 14', fill: 'none' }, null, { st: '#FF5A36', sw: 5, nosil: 1 });
+
+  // Right raised arm holding pointer stick (pivots at shoulder 64, -226)
+  S('arm', 'path', { d: 'M 64 -226 L 128 -318', fill: 'none' }, null, { st: HD, sw: 32 });
+  S('arm', 'line', { x1: 132, y1: -324, x2: 235, y2: -435 }, null, { st: HR, sw: 10 });
+  S('arm', 'circle', { cx: 235, cy: -435, r: 11 }, ACC);
+  S('arm', 'circle', { cx: 130, cy: -320, r: 18 }, SK);
+
+  // Head & glasses (pivots at neck 0, -244)
+  S('head', 'circle', { cx: -82, cy: -318, r: 16 }, SK);
+  S('head', 'circle', { cx: 82, cy: -318, r: 16 }, SK);
+  S('head', 'circle', { cx: 0, cy: -324, r: 84 }, SK);
+  // Hair
+  S('head', 'path', { d: 'M -86 -312 C -92 -390 -44 -418 0 -416 C 52 -416 92 -388 86 -312 C 72 -342 46 -358 16 -362 C -6 -344 -36 -336 -60 -334 C -74 -330 -82 -320 -86 -312 Z' }, HR);
+  S('head', 'path', { d: 'M -6 -412 C -14 -442 12 -454 30 -442 C 14 -436 6 -426 8 -412 Z' }, HR);
+  // Bold Creator Glasses
+  S('head', 'rect', { x: -64, y: -336, width: 54, height: 38, rx: 10 }, 'rgba(255,255,255,0.45)', { st: HR, sw: 7, nosil: 1 });
+  S('head', 'rect', { x: 10, y: -336, width: 54, height: 38, rx: 10 }, 'rgba(255,255,255,0.45)', { st: HR, sw: 7, nosil: 1 });
+  S('head', 'line', { x1: -10, y1: -318, x2: 10, y2: -318 }, null, { st: HR, sw: 6, nosil: 1 });
+  // Eyes & smile
+  S('head', 'ellipse', { cx: -37, cy: -316, rx: 7, ry: 9.5 }, HR, { nosil: 1 });
+  S('head', 'ellipse', { cx: 37, cy: -316, rx: 7, ry: 9.5 }, HR, { nosil: 1 });
+  S('head', 'circle', { cx: -34, cy: -320, r: 2.8 }, '#fff', { nosil: 1 });
+  S('head', 'circle', { cx: 40, cy: -320, r: 2.8 }, '#fff', { nosil: 1 });
+  S('head', 'ellipse', { cx: -58, cy: -282, rx: 12, ry: 7 }, 'rgba(255,105,85,0.5)', { nosil: 1 });
+  S('head', 'ellipse', { cx: 58, cy: -282, rx: 12, ry: 7 }, 'rgba(255,105,85,0.5)', { nosil: 1 });
+  S('head', 'path', { d: 'M -18 -276 L 18 -276 Q 16 -252 0 -252 Q -16 -252 -18 -276 Z' }, HR, { nosil: 1 });
+  S('head', 'path', { d: 'M -9 -260 Q 0 -266 9 -260 Q 6 -253 0 -253 Q -6 -253 -9 -260 Z' }, '#FF7A66', { nosil: 1 });
+
+  const attrStr = o => Object.entries(o).map(([k, v]) => `${k}="${v}"`).join(' ');
+  const pass = (g, sil) => G[g].filter(o => !(sil && o.nosil)).map(o => {
+    const st = o.st;
+    if (sil) {
+      return `<${o.tag} ${attrStr(o.at)} fill="${st ? 'none' : '#F7F9FB'}" stroke="#F7F9FB" stroke-width="${(o.sw || 0) + 2 * OW}" stroke-linejoin="round" stroke-linecap="round"/>`;
+    }
+    return `<${o.tag} ${attrStr(o.at)} ${o.fill ? `fill="${o.fill}"` : ''} ${st ? `stroke="${st}" stroke-width="${o.sw}" stroke-linecap="round" stroke-linejoin="round"` : ''}/>`;
+  }).join('');
+
+  const ORD = ['body', 'arm', 'head'];
+  const wrap = el('div', 'a', screen,
+    `z-index:22;left:${HOST_POS.x - 200}px;top:${HOST_POS.y - 600}px;width:440px;height:640px;transform-origin:200px 600px;opacity:0`,
+    `<svg width="440" height="640" style="overflow:visible"><g transform="translate(200 600)">${ORD.map(g => `<g data-g="${g}">${pass(g, 1)}</g>`).join('')}${ORD.map(g => `<g data-g="${g}">${pass(g, 0)}</g>`).join('')}</g></svg>`
+  );
+  const gSel = k => [...wrap.querySelectorAll(`g[data-g="${k}"]`)];
+  return { wrap, body: gSel('body'), arm: gSel('arm'), head: gSel('head') };
+}
+const HOST = buildStickerHost();
+
+// 3 DM Question Bubble Stickers placed cleanly to the right of the Host (zero overlap with Host face!)
+const BUBBLES_DATA = [
+  { x: 515, y: 270, rot: -4.2, c: '#25313D', tag: '私信 #01', txt: '到底充哪个不亏？💸' },
+  { x: 535, y: 455, rot: 3.1,  c: '#3186FF', tag: '私信 #02', txt: '写代码选 Claude 还是 GPT？' },
+  { x: 520, y: 645, rot: -2.8, c: '#D97757', tag: '私信 #03', txt: 'Gemini 免费版够用吗？' },
+];
+const BUBBLES = BUBBLES_DATA.map((b, i) => {
+  const d = el('div', 'stk', screen,
+    `left:${b.x}px;top:${b.y}px;z-index:${24 + i};padding:16px 24px 18px;background:#F7F9FB;border-radius:24px;box-shadow:0 0 0 8px #F7F9FB,0 14px 32px rgba(22,34,46,.22);border:4px solid ${b.c};opacity:0`,
+    `<div style="font:800 17px/1 'Inter',sans-serif;color:${b.c};letter-spacing:.12em;margin-bottom:7px">${b.tag}</div>
+     <div style="font:900 28px/1.15 'Alibaba PuHuiTi',sans-serif;color:#1D2731;white-space:nowrap">${b.txt}</div>`
+  );
+  return { ...b, d, t0: EV.bubbles[i] };
+});
+
+// Zone A Right Typography Column
+const AX = 1030;
+const aKick = el('div', 'a', screen,
+  `left:${AX}px;top:300px;font:800 30px/1 'Alibaba PuHuiTi';color:#25313D;letter-spacing:.05em;white-space:nowrap`,
+  `<span style="display:inline-block;width:22px;height:22px;background:#FF5A36;margin-right:16px;vertical-align:-2px;border-radius:4px"></span>高频灵魂发问 <span class="mono" style="color:#7C8B99;font-size:22px;letter-spacing:.16em;margin-left:14px">DAILY QUESTION · 01</span>`
+);
+const aL1m = el('div', 'mask', screen, `left:${AX - 12}px;top:368px;width:1220px;height:160px`);
+const aL1 = el('div', 'a', aL1m, `left:12px;top:6px;font:900 124px/1.12 'Alibaba PuHuiTi';color:#1D2731;letter-spacing:-.02em;white-space:nowrap`, '每天都有人问我：');
+
+const aL2m = el('div', 'mask', screen, `left:${AX - 12}px;top:530px;width:1260px;height:170px`);
+const aMark = el('div', 'a', aL2m, `left:${12 + 118 * 3.1}px;top:106px;width:${118 * 5.2}px;height:40px;background:#FF5A36;border-radius:8px;transform-origin:0 50%`);
+const aL2 = el('div', 'a', aL2m, `left:12px;top:6px;font:900 118px/1.12 'Alibaba PuHuiTi';color:#1D2731;letter-spacing:-.02em;white-space:nowrap`, '三大AI到底该充谁？');
+
+const aSub = el('div', 'a mono', screen, `left:${AX}px;top:730px;font:700 26px/1 'Inter',monospace;letter-spacing:.14em;color:#6E7E8D;white-space:nowrap`, 'GEMINI  ×  CLAUDE  ×  CHATGPT  //  REAL WORKFLOW SHOWDOWN');
+const aRule = el('div', 'a', screen, `left:${AX}px;top:786px;width:960px;height:4px;background:#25313D;transform-origin:0 50%`);
+
+// Zone A Question Badge (peels off at 1.70s for Graphic Match #1)
+const qAnchorA = { x: AX + 150, y: 890 };
+const aNote = el('div', 'a', screen, `left:${AX + 300}px;top:848px;font:700 34px/1.45 'Alibaba PuHuiTi';color:#3A4A5A;white-space:nowrap`,
+  `每月 <span class="num" style="color:#FF5A36;font-weight:900">$20</span> 订阅费，选错不仅浪费钱<br><span style="color:#6E7E8D;font-size:26px">更会在真实工作流里多走无数弯路</span>`
+);
+
+// Next-Token Probability Distribution Card (inspired by mexicat/pdoom-video prompt.ts)
+const tokenDistCard = el('div', 'stk mono', screen,
+  `left:${AX + 580}px;top:145px;width:540px;border-radius:20px;background:#141C26;border:6px solid #F7F9FB;box-shadow:0 16px 36px rgba(14,20,28,.28);padding:16px 22px;color:#E2E8F0;z-index:30;opacity:0`,
+  `<div style="display:flex;justify-content:space-between;font-size:15px;color:#94A3B8;margin-bottom:10px;border-bottom:1px solid #263445;padding-bottom:6px">
+     <span>NEXT-TOKEN LOGITS // P(最强AI)</span>
+     <span style="color:#FF5A36;font-weight:800">tok #40912</span>
+   </div>
+   <div style="display:flex;flex-direction:column;gap:8px;font-size:18px;font-weight:700">
+     <div style="display:flex;align-items:center;gap:10px"><span style="width:92px;color:#D97757">Claude</span><div style="flex:1;height:12px;background:#263445;border-radius:6px;overflow:hidden"><div class="td-b0" style="height:100%;background:#D97757;width:36%"></div></div><span class="td-p0" style="width:52px;text-align:right">0.36</span></div>
+     <div style="display:flex;align-items:center;gap:10px"><span style="width:92px;color:#3186FF">Gemini</span><div style="flex:1;height:12px;background:#263445;border-radius:6px;overflow:hidden"><div class="td-b1" style="height:100%;background:#3186FF;width:34%"></div></div><span class="td-p1" style="width:52px;text-align:right">0.34</span></div>
+     <div style="display:flex;align-items:center;gap:10px"><span style="width:92px;color:#10A37F">ChatGPT</span><div style="flex:1;height:12px;background:#263445;border-radius:6px;overflow:hidden"><div class="td-b2" style="height:100%;background:#10A37F;width:28%"></div></div><span class="td-p2" style="width:52px;text-align:right">0.28</span></div>
+     <div style="display:flex;align-items:center;gap:10px"><span style="width:92px;color:#FF5A36">全充破产</span><div style="flex:1;height:12px;background:#263445;border-radius:6px;overflow:hidden"><div style="height:100%;background:#FF5A36;width:92%"></div></div><span style="width:52px;text-align:right;color:#FF5A36">0.99</span></div>
+   </div>`
+);
+const tdB = [0, 1, 2].map(i => tokenDistCard.querySelector('.td-b' + i));
+const tdP = [0, 1, 2].map(i => tokenDistCard.querySelector('.td-p' + i));
+
+// The Continuous Hazard-Orange Spark & Fuse Spine across all 4 Zones (inspired by mexicat/pdoom-video _motifs.ts)
+const fuseSvg = sv('svg', { width: WW, height: WH, style: 'position:absolute;left:0;top:0;z-index:20;overflow:visible;pointer-events:none' }, screen);
+const fusePath = sv('path', {
+  d: `M 940 786 C 1450 786, 1200 1320, 1200 1625 L 1200 3280 L 1200 4580`,
+  fill: 'none', stroke: '#FF5A36', 'stroke-width': 5, 'stroke-dasharray': '10 14', opacity: '0.45'
+}, fuseSvg);
+const sparkGroup = sv('g', { opacity: '0' }, fuseSvg);
+sv('circle', { cx: 0, cy: 0, r: 26, fill: 'rgba(255,90,54,0.28)' }, sparkGroup);
+sv('circle', { cx: 0, cy: 0, r: 11, fill: '#FF5A36' }, sparkGroup);
+sv('circle', { cx: 0, cy: 0, r: 5, fill: '#FFF6E9' }, sparkGroup);
+const sparkRays = [0, 1, 2, 3, 4, 5].map(i =>
+  sv('line', { x1: 0, y1: 0, x2: 24, y2: 0, stroke: i % 2 ? '#FF5A36' : '#FFC62B', 'stroke-width': 3.5, 'stroke-linecap': 'round' }, sparkGroup)
+);
+
+U.push(t => {
+  // Terminal prompt morphs into Sticker Host at 0.12s
+  const tpIn = oB(P(t, 0.0, 0.11), 2.0);
+  const tpOut = oC(P(t, EV.host_land - 0.02, 0.10));
+  termPrompt.style.opacity = t < EV.host_land + 0.08 ? clamp(tpIn) * (1 - tpOut) : 0;
+  termPrompt.style.transform = `scale(${(tpIn * (1 + 0.35 * tpOut)).toFixed(3)}) rotate(${(-4 * tpOut).toFixed(2)}deg)`;
+
+  const sl = slap(t, EV.host_land, 0.16, 0.36, -6);
+  HOST.wrap.style.opacity = sl.o;
+  HOST.wrap.style.transform = `rotate(${sl.r.toFixed(2)}deg) scale(${sl.sx.toFixed(4)}, ${sl.sy.toFixed(4)})`;
+  HOST.wrap.style.filter = shadow(sl.lift * 0.9);
+
+  // Continuous living breathing + pointer wave on Host
+  const breath = Math.sin(t * 3.4) * 4.5;
+  const armWave = lerp(-24, 8, oB(P(t, 0.22, 0.45), 1.8)) + Math.sin(t * 4.8) * 6.5;
+  const headBob = Math.sin(t * 2.7 + 0.5) * 3.8;
+  HOST.body.forEach(g => g.setAttribute('transform', `translate(0 ${(breath * 0.4).toFixed(2)})`));
+  HOST.arm.forEach(g => g.setAttribute('transform', `translate(0 ${breath.toFixed(2)}) rotate(${armWave.toFixed(2)} 64 -226)`));
+  HOST.head.forEach(g => g.setAttribute('transform', `translate(0 ${(breath * 1.2).toFixed(2)}) rotate(${headBob.toFixed(2)} 0 -244)`));
+
+  // DM Bubbles pop with Squash & Stretch + continuous float
+  BUBBLES.forEach((b, i) => {
+    const p = popSS(t, b.t0, 2.8, 0.36, 0.16);
+    const flY = Math.sin(t * 3.1 + i * 1.7) * 6;
+    const flR = Math.cos(t * 2.4 + i) * 1.4;
+    b.d.style.opacity = p.o;
+    b.d.style.transform = `translate(0px, ${flY.toFixed(1)}px) rotate(${(b.rot + flR).toFixed(2)}deg) scale(${p.sx.toFixed(4)}, ${p.sy.toFixed(4)})`;
+  });
+
+  // Headline & Marker animations
+  const k = oC(P(t, EV.kicker, 0.32));
+  aKick.style.opacity = k;
+  aKick.style.transform = `translateY(${((1 - k) * 20).toFixed(1)}px)`;
+
+  aL1.style.transform = `translateY(${((1 - oX(P(t, EV.title1, 0.46))) * 165).toFixed(1)}px)`;
+  aL2.style.transform = `translateY(${((1 - oX(P(t, EV.title2, 0.48))) * 175).toFixed(1)}px)`;
+  aMark.style.transform = `scaleX(${ioC(P(t, EV.marker_a[0], EV.marker_a[1] - EV.marker_a[0])).toFixed(4)})`;
+
+  const sb = oC(P(t, 0.68, 0.35));
+  aSub.style.opacity = sb;
+  aSub.style.transform = `translateX(${((1 - sb) * -28).toFixed(1)}px)`;
+  aRule.style.transform = `scaleX(${oQ(P(t, 0.74, 0.45)).toFixed(4)})`;
+  const nt = oC(P(t, 0.84, 0.38));
+  aNote.style.opacity = nt;
+  aNote.style.transform = `translateY(${((1 - nt) * 18).toFixed(1)}px)`;
+
+  // Next-Token Probability Distribution popup animation (pdoom-video prompt.ts style)
+  const tdPop = popSS(t, 0.42, 2.8, 0.36, 0.14);
+  tokenDistCard.style.opacity = tdPop.o;
+  tokenDistCard.style.transform = `rotate(${(2.2 + Math.sin(t * 3.5) * 1.1).toFixed(2)}deg) scale(${tdPop.sx.toFixed(4)}, ${tdPop.sy.toFixed(4)})`;
+  const p0 = 0.34 + 0.08 * Math.sin(t * 6.2), p1 = 0.33 + 0.08 * Math.cos(t * 5.8), p2 = Math.max(0.15, 0.98 - p0 - p1);
+  [p0, p1, p2].forEach((pv, idx) => {
+    tdB[idx].style.width = `${Math.round(pv * 100)}%`;
+    tdP[idx].textContent = pv.toFixed(2);
+  });
+
+  // The Spark & Fuse Spine animation across the world canvas
+  const fLen = fusePath.getTotalLength();
+  const sparkU = clamp(t / 13.5, 0, 1);
+  const sPt = fusePath.getPointAtLength(fLen * sparkU);
+  sparkGroup.setAttribute('opacity', t > 0.2 && t < 13.6 ? '1' : '0');
+  sparkGroup.setAttribute('transform', `translate(${sPt.x.toFixed(1)} ${sPt.y.toFixed(1)}) rotate(${(t * 220).toFixed(1)})`);
+  sparkRays.forEach((ln, idx) => {
+    const ang = idx * 60 * Math.PI / 180;
+    const r1 = 10 + ((t * 45 + idx * 7) % 14);
+    const r2 = r1 + 12;
+    ln.setAttribute('x1', (Math.cos(ang) * r1).toFixed(1));
+    ln.setAttribute('y1', (Math.sin(ang) * r1).toFixed(1));
+    ln.setAttribute('x2', (Math.cos(ang) * r2).toFixed(1));
+    ln.setAttribute('y2', (Math.sin(ang) * r2).toFixed(1));
+  });
+});
+
+
+// ==================== ZONE B (1.84s - 8.02s): 三大顶流 2.5D 键帽底座 + 粗白边贴纸对决 ====================
+const BY = 2120;
+const bHeader = el('div', 'a', screen,
+  `left:220px;top:${BY - 560}px;font:900 34px/1 'Alibaba PuHuiTi';color:#25313D;letter-spacing:.04em`,
+  `<span style="display:inline-block;width:22px;height:22px;background:#FF5A36;margin-right:14px;vertical-align:-2px;border-radius:4px"></span>01 三大顶流同台对决 <span class="mono" style="color:#7C8B99;font-size:22px;letter-spacing:.18em;margin-left:16px">THE BIG THREE ARENA</span>`
+);
+
+// Graphic Match #1 Question Pill (sits in Zone A, peels at 1.70s, lands at Zone B top center at 2.16s)
+const qTargetB = { x: 1200, y: BY - 495 };
+const qPill = el('div', 'stk', screen,
+  `left:0;top:0;width:260px;height:96px;border-radius:48px;background:#FF5A36;border:10px solid #F7F9FB;z-index:45;display:flex;align-items:center;justify-content:center;color:#fff;font:900 42px/1 'Alibaba PuHuiTi';letter-spacing:.04em`,
+  `？到底选谁`
+);
+
+U.push(t => {
+  const pIn = popSS(t, 0.80, 2.8, 0.38, 0.14);
+  if (t < 0.80) {
+    qPill.style.opacity = 0;
+    return;
+  }
+  const uFly = eFly(P(t, EV.q_peel, EV.q_land - EV.q_peel));
+  const arc = Math.sin(Math.PI * uFly);
+  const x = lerp(qAnchorA.x, qTargetB.x, uFly) + arc * 160;
+  const y = lerp(qAnchorA.y, qTargetB.y, uFly);
+  const w = wob(t - EV.q_land, 4.8, 11) * (t >= EV.q_land ? 1 : 0);
+  const sc = (t < EV.q_peel ? pIn.s : lerp(1.0, 1.12, Math.sin(Math.PI * uFly))) * (1 + 0.08 * w);
+  const rot = lerp(-4, 0, uFly) + arc * 12 + w * -2;
+  qPill.style.opacity = pIn.o;
+  qPill.style.transform = `translate(${(x - 130).toFixed(1)}px, ${(y - 48).toFixed(1)}px) rotate(${rot.toFixed(2)}deg) scale(${sc.toFixed(4)})`;
+  qPill.style.filter = shadow(arc * 0.9 + 0.15);
+});
+
+// Brand SVG Logos (Official paths from assets/*.svg)
+const LOGO_SVG = {
+  gemini: `<svg viewBox="0 0 24 24" width="130" height="130"><defs><linearGradient id="g0" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#3186FF"/><stop offset="55%" stop-color="#8B5CF6"/><stop offset="100%" stop-color="#F94543"/></linearGradient></defs><path d="M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z" fill="url(#g0)"/></svg>`,
+  claude: `<svg viewBox="0 0 24 24" width="130" height="130"><path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z" fill="#D97757"/></svg>`,
+  chatgpt: `<svg viewBox="0 0 24 24" width="130" height="130"><path d="M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z" fill="#10A37F"/></svg>`
+};
+
+const arenaSvg = sv('svg', { width: WW, height: WH, style: 'position:absolute;left:0;top:0;z-index:26;overflow:visible' }, screen);
+
+const MODELS = [
+  {
+    id: 'gemini', name: 'Gemini', maker: 'GOOGLE', x: 540, y: BY - 80, rot: -2.8,
+    col: '#3186FF', dark: '#1D4ED8', bg: '#EFF6FF',
+    role: '多模态巨兽 & 生态管家', pills: ['2M 超长上下文', '原生音视频理解'],
+    an: [540, BY + 195], end: [540, BY + 295]
+  },
+  {
+    id: 'claude', name: 'Claude', maker: 'ANTHROPIC', x: 1200, y: BY - 80, rot: 1.8,
+    col: '#D97757', dark: '#B45309', bg: '#FFF7ED',
+    role: '代码之神 & 质感文字匠人', pills: ['工程一次成型', '零 AI 塑料感'],
+    an: [1200, BY + 195], end: [1200, BY + 295]
+  },
+  {
+    id: 'chatgpt', name: 'ChatGPT', maker: 'OPENAI', x: 1860, y: BY - 80, rot: -2.2,
+    col: '#10A37F', dark: '#047857', bg: '#ECFDF5',
+    role: '六边形全能日常管家', pills: ['实时满血语音', '全能插件工具箱'],
+    an: [1860, BY + 195], end: [1860, BY + 295]
+  }
+].map((m, i) => {
+  // 2.5D Mechanical Keycap Diorama Card with 14px white die-cut sticker border
+  const cw = 520, ch = 460;
+  const card = el('div', 'stk', screen,
+    `width:${cw}px;height:${ch}px;z-index:${28 + i};opacity:0`,
+    `<!-- 2.5D Keycap Bevel Base -->
+     <div style="position:absolute;left:0;top:26px;width:${cw}px;height:${ch}px;border-radius:44px;background:${m.dark};box-shadow:0 0 0 14px #F7F9FB"></div>
+     <!-- Keycap Top Diorama Surface -->
+     <div class="kcap-top" style="position:absolute;left:0;top:0;width:${cw}px;height:${ch}px;border-radius:42px;background:#F7F9FB;border:6px solid ${m.col};overflow:hidden;padding:34px 36px">
+       <div style="position:absolute;right:-40px;top:-40px;width:210px;height:210px;border-radius:50%;background:${m.bg}"></div>
+       <div style="display:flex;align-items:center;justify-content:space-between;position:relative">
+         <div>
+           <div class="mono" style="font:800 20px/1 'Inter',monospace;color:${m.col};letter-spacing:.18em">${m.maker}</div>
+           <div class="num" style="font:900 66px/1.05 'Inter',sans-serif;color:#1D2731;letter-spacing:-.03em;margin-top:6px">${m.name}</div>
+         </div>
+         <div class="logo-spin" style="width:130px;height:130px;display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 8px 16px rgba(0,0,0,.1))">${LOGO_SVG[m.id]}</div>
+       </div>
+       <div style="margin-top:28px;padding:14px 20px;border-radius:16px;background:${m.bg};font:900 30px/1 'Alibaba PuHuiTi';color:${m.col};display:inline-block">${m.role}</div>
+       <div style="display:flex;gap:12px;margin-top:22px">
+         ${m.pills.map(p => `<span style="padding:10px 18px;border-radius:12px;background:#E9EEF2;font:700 23px/1 'Alibaba PuHuiTi';color:#3A4A5A">${p}</span>`).join('')}
+       </div>
+     </div>`
+  );
+
+  // Price tag badge ($20/mo) that peels off at 7.86s for Graphic Match #2
+  const priceTag = el('div', 'stk num', screen,
+    `width:168px;height:66px;border-radius:20px;background:#1D2731;color:#fff;border:7px solid #F7F9FB;z-index:35;display:flex;align-items:center;justify-content:center;font:900 30px/1 'Inter';box-shadow:0 10px 22px rgba(18,28,40,.28);opacity:0`,
+    `$20<span style="font-size:20px;color:#9AA8B6;margin-left:4px">/mo</span>`
+  );
+
+  // SVG Leader line + Dot below each keycap
+  const line = sv('path', {
+    d: `M${m.an[0]} ${m.an[1]} L${m.end[0]} ${m.end[1]}`,
+    fill: 'none', stroke: m.col, 'stroke-width': 5, 'stroke-linecap': 'round',
+    pathLength: 1, 'stroke-dasharray': '1 1', 'stroke-dashoffset': 1
+  }, arenaSvg);
+  const dot = sv('circle', { cx: m.an[0], cy: m.an[1], r: 0, fill: m.col, stroke: '#F7F9FB', 'stroke-width': 5 }, arenaSvg);
+
+  const callout = el('div', 'a', screen,
+    `left:${m.end[0] - 210}px;top:${m.end[1] + 14}px;width:420px;text-align:center;font:800 28px/1.2 'Alibaba PuHuiTi';color:#25313D;opacity:0`,
+    `主力定位：<span style="color:${m.col}">${m.pills[0]}</span>`
+  );
+
+  return {
+    ...m, cw, ch, card, ktop: card.querySelector('.kcap-top'), logoEl: card.querySelector('.logo-spin'),
+    priceTag, line, dot, callout, land: EV.cards_land[i], lt: EV.leaders[i]
+  };
+});
+
+// VS Electric Bolts + Hopping Golden Crown ("到底哪个最强？")
+const vsBolt1 = sv('path', { d: `M810 ${BY - 80} L870 ${BY - 110} L855 ${BY - 65} L930 ${BY - 95}`, fill: 'none', stroke: '#FF5A36', 'stroke-width': 8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0 }, arenaSvg);
+const vsBolt2 = sv('path', { d: `M1470 ${BY - 80} L1530 ${BY - 110} L1515 ${BY - 65} L1590 ${BY - 95}`, fill: 'none', stroke: '#FF5A36', 'stroke-width': 8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 0 }, arenaSvg);
+
+const crown = el('div', 'stk', screen,
+  `width:180px;height:110px;z-index:42;opacity:0`,
+  `<svg viewBox="-90 -65 180 120" width="180" height="120" style="overflow:visible">
+     <path d="M-68 32 L-78 -28 L-32 4 L0 -42 L32 4 L78 -28 L68 32 Z" fill="#FFC62B" stroke="#F7F9FB" stroke-width="18" stroke-linejoin="round" paint-order="stroke"/>
+     <path d="M-68 32 L-78 -28 L-32 4 L0 -42 L32 4 L78 -28 L68 32 Z" fill="#FFC62B" stroke="#1D2731" stroke-width="6" stroke-linejoin="round"/>
+     <text x="0" y="21" text-anchor="middle" font-family="Inter" font-weight="900" font-size="28" fill="#1D2731">NO.1 ?</text>
+   </svg>`
+);
+
+// Subscription Bill Card ("我该充哪一个？") + Hanazi Burst ("钱包顶不住!! 💸")
+const billY = BY + 455;
+const billCard = el('div', 'stk', screen,
+  `width:960px;height:190px;border-radius:36px;background:#1D2731;border:12px solid #F7F9FB;z-index:32;padding:28px 46px;display:flex;align-items:center;justify-content:space-between;color:#fff;opacity:0`,
+  `<div>
+     <div class="mono" style="font:800 20px/1 'Inter';color:#FF5A36;letter-spacing:.18em">MONTHLY SUBSCRIPTION BILL</div>
+     <div style="font:900 48px/1.2 'Alibaba PuHuiTi';margin-top:10px">我该充哪一个？全订账单：</div>
+   </div>
+   <div style="text-align:right">
+     <div id="billNum" class="num" style="font:900 84px/1 'Inter';color:#FFC62B;letter-spacing:-.03em">$0<span style="font-size:32px;color:#9AA8B6">/月</span></div>
+     <div id="billRmb" style="font:700 24px/1 'Alibaba PuHuiTi';color:#9AA8B6;margin-top:6px">约合 ¥0 / 年</div>
+   </div>`
+);
+const billNum = billCard.querySelector('#billNum');
+const billRmb = billCard.querySelector('#billRmb');
+
+// Variety-show Hanazi 3-layer stroke caption ("全充？钱包顶不住!! 💸")
+const hanazi = el('div', 'stk', screen,
+  `left:1560px;top:${billY - 85}px;width:580px;height:160px;z-index:44;opacity:0`,
+  `<svg viewBox="-290 -80 580 160" width="580" height="160" style="overflow:visible">
+     <!-- Radial explosion burst frame -->
+     <path d="M-260 -15 L-220 -55 L-150 -42 L-90 -72 L-20 -48 L60 -75 L120 -44 L200 -66 L245 -22 L275 15 L230 58 L160 48 L95 74 L15 52 L-70 74 L-140 46 L-225 62 Z"
+           fill="#FF2E63" stroke="#F7F9FB" stroke-width="14" stroke-linejoin="round" paint-order="stroke"/>
+     <text x="0" y="16" text-anchor="middle" font-family="'Alibaba PuHuiTi',sans-serif" font-weight="900" font-size="52"
+           fill="#FFE600" stroke="#1D2731" stroke-width="14" stroke-linejoin="round" paint-order="stroke">全充？钱包顶不住!!</text>
+   </svg>`
+);
+
+U.push(t => {
+  bHeader.style.opacity = oC(P(t, 1.95, 0.35));
+
+  MODELS.forEach((m, i) => {
+    const sl = slap(t, m.land, 0.19, 0.38, i === 1 ? 5 : -6);
+    const flY = Math.sin(t * 2.8 + i * 2.1) * 6;
+    // Keycap depression when crown hops onto it
+    const hopDt = t - EV.crown_hops[i];
+    const keyPress = hopDt >= 0 && hopDt < 0.35 ? Math.sin(Math.PI * (hopDt / 0.35)) * 16 : 0;
+
+    m.card.style.opacity = sl.o;
+    m.card.style.transform = `translate(${(m.x - m.cw / 2).toFixed(1)}px, ${(m.y - m.ch / 2 + flY).toFixed(1)}px) rotate(${(m.rot + sl.r).toFixed(2)}deg) scale(${sl.sx.toFixed(4)}, ${sl.sy.toFixed(4)})`;
+    m.card.style.filter = shadow(sl.lift);
+    m.ktop.style.transform = `translateY(${keyPress.toFixed(1)}px)`;
+    m.logoEl.style.transform = `rotate(${(Math.sin(t * 2.2 + i) * 6).toFixed(2)}deg) scale(${(1 + 0.05 * Math.cos(t * 3.4 + i)).toFixed(3)})`;
+
+    // Leader line & callout
+    const lu = oC(P(t, m.lt, 0.26));
+    m.line.setAttribute('stroke-dashoffset', (1 - lu).toFixed(3));
+    const du = oB(P(t, m.lt - 0.04, 0.22), 2.2);
+    m.dot.setAttribute('r', (11 * clamp(du, 0, 1.5)).toFixed(2));
+    const cu = oC(P(t, m.lt + 0.06, 0.25));
+    m.callout.style.opacity = cu;
+    m.callout.style.transform = `translateY(${((1 - cu) * 16).toFixed(1)}px)`;
+
+    // Price tag on top-right of each card -> peels off at EV.tags_peel (7.86s) for Graphic Match #2
+    const tagIn = popSS(t, m.land + 0.14, 2.8, 0.38, 0.15);
+    const uPeel = eFly(P(t, EV.tags_peel, EV.tags_land - EV.tags_peel));
+    const arc = Math.sin(Math.PI * uPeel);
+    const sx = m.x + 190, sy = m.y - 225 + flY;
+    const tx = 1200 + (i - 1) * 180, ty = 3290;
+    const px = lerp(sx, tx, uPeel) + (i - 1) * arc * 90;
+    const py = lerp(sy, ty, uPeel);
+    m.priceTag.style.opacity = t < m.land + 0.14 ? 0 : (t >= EV.tags_land + 0.15 ? 1 - oC(P(t, EV.tags_land + 0.15, 0.2)) : tagIn.o);
+    m.priceTag.style.transform = `translate(${(px - 84).toFixed(1)}px, ${(py - 33).toFixed(1)}px) rotate(${(lerp(8, 0, uPeel) + arc * 15).toFixed(2)}deg) scale(${(tagIn.s * (1 + 0.25 * arc)).toFixed(3)})`;
+  });
+
+  // VS Lightning boil
+  const vsOn = t >= EV.vs_bolt && t < 7.8;
+  const boil = Math.floor(t * 15) % 2 === 0 ? 1 : -1;
+  vsBolt1.setAttribute('opacity', vsOn ? '1' : '0');
+  vsBolt2.setAttribute('opacity', vsOn ? '1' : '0');
+  vsBolt1.setAttribute('transform', `translate(0 ${boil * 4})`);
+  vsBolt2.setAttribute('transform', `translate(0 ${-boil * 4})`);
+
+  // Hopping Crown ("到底哪个最强？")
+  const h0 = EV.crown_hops[0], h1 = EV.crown_hops[1], h2 = EV.crown_hops[2];
+  if (t < h0) {
+    crown.style.opacity = 0;
+  } else {
+    crown.style.opacity = 1;
+    let cx = MODELS[0].x, cy = MODELS[0].y - 290, cr = -6;
+    if (t >= h0 && t < h1) {
+      const u = clamp((t - h0) / (h1 - h0));
+      cx = lerp(MODELS[0].x, MODELS[1].x, u);
+      cy = MODELS[0].y - 290 - Math.sin(Math.PI * u) * 150;
+      cr = lerp(-8, 8, u);
+    } else if (t >= h1 && t < h2) {
+      const u = clamp((t - h1) / (h2 - h1));
+      cx = lerp(MODELS[1].x, MODELS[2].x, u);
+      cy = MODELS[1].y - 290 - Math.sin(Math.PI * u) * 150;
+      cr = lerp(8, -6, u);
+    } else {
+      cx = MODELS[2].x;
+      cy = MODELS[2].y - 290 + Math.sin(t * 5) * 8;
+      cr = Math.sin(t * 4) * 5;
+    }
+    const cPop = oB(P(t, h0, 0.2), 2.2);
+    crown.style.transform = `translate(${(cx - 90).toFixed(1)}px, ${(cy - 55).toFixed(1)}px) rotate(${cr.toFixed(2)}deg) scale(${cPop.toFixed(3)})`;
+    crown.style.filter = shadow(0.35);
+  }
+
+  // Subscription Bill card & rolling counter ("我该充哪一个？")
+  const bSl = slap(t, EV.bill_land, 0.18, 0.32, 3);
+  billCard.style.opacity = bSl.o;
+  billCard.style.transform = `translate(${(980 - 480).toFixed(1)}px, ${(billY - 95).toFixed(1)}px) rotate(${bSl.r.toFixed(2)}deg) scale(${bSl.sx.toFixed(4)}, ${bSl.sy.toFixed(4)})`;
+  billCard.style.filter = shadow(bSl.lift);
+
+  const dU = ioC(P(t, EV.bill_ticks[0], EV.bill_ticks[3] - EV.bill_ticks[0]));
+  const dollars = Math.round(lerp(0, 60, dU));
+  const rmb = Math.round(dollars * 7.25 * 12);
+  billNum.innerHTML = `$${dollars}<span style="font-size:32px;color:#9AA8B6">/月</span>`;
+  billRmb.textContent = `全部订阅约合 ¥${rmb.toLocaleString()} / 年`;
+
+  // Hanazi pop & continuous wiggle
+  const hz = popSS(t, EV.hanazi_pop, 3.0, 0.32, 0.18);
+  const wigR = Math.sin(t * 14) * 2.4;
+  hanazi.style.opacity = hz.o;
+  hanazi.style.transform = `rotate(${(-6 + wigR).toFixed(2)}deg) scale(${hz.sx.toFixed(4)}, ${hz.sy.toFixed(4)})`;
+  hanazi.style.filter = shadow(0.3);
+});
+
+
+// ==================== ZONE C (8.02s - 12.88s): “某一个模型在所有领域吊打其他两个” -> 伪命题盖章粉碎 ====================
+const CY = 3720;
+const cHeader = el('div', 'a', screen,
+  `left:220px;top:${CY - 540}px;font:900 34px/1 'Alibaba PuHuiTi';color:#25313D;letter-spacing:.04em`,
+  `<span style="display:inline-block;width:22px;height:22px;background:#FF5A36;margin-right:14px;vertical-align:-2px;border-radius:4px"></span>02 戳破营销话术 <span class="mono" style="color:#7C8B99;font-size:22px;letter-spacing:.18em;margin-left:16px">MYTH BUSTER · BENCHMARK TRAP</span>`
+);
+
+const mythBoard = el('div', 'stk', screen,
+  `left:240px;top:${CY - 440}px;width:1920px;height:820px;border-radius:48px;background:#F7F9FB;border:12px solid #F7F9FB;box-shadow:0 28px 70px rgba(18,28,40,.22);padding:52px 68px;z-index:25;opacity:0`,
+  `<div style="display:flex;align-items:center;justify-content:space-between;border-bottom:4px solid #E1E8F0;padding-bottom:32px">
+     <div>
+       <div class="mono" style="font:800 22px/1 'Inter';color:#FF5A36;letter-spacing:.2em">FAKE HYPE CLAIM // 常见营销噱头</div>
+       <div style="font:900 64px/1.15 'Alibaba PuHuiTi';color:#1D2731;margin-top:10px">“某一个模型在所有领域吊打其他两个”？</div>
+     </div>
+     <div id="mythBadge" style="padding:18px 32px;border-radius:22px;background:#FFF3CD;border:4px solid #FFC62B;font:900 34px/1 'Alibaba PuHuiTi';color:#B45309;transform-origin:50% 50%">
+       🏆 宇宙第一通杀全场？
+     </div>
+   </div>
+   <div id="mythRows" style="margin-top:42px;display:flex;flex-direction:column;gap:34px"></div>`
+);
+const mythBadge = mythBoard.querySelector('#mythBadge');
+const mythRows = mythBoard.querySelector('#mythRows');
+
+const MYTH_BARS = [
+  { zh: '复杂工程与前端代码生成', en: 'CODING & AGENT', col: '#D97757' },
+  { zh: '原生数G视频与百万上下文吞吐', en: 'NATIVE MULTIMODAL', col: '#3186FF' },
+  { zh: '去 AI 味深度长文与脚本创作', en: 'HUMAN-GRADE COPY', col: '#25313D' },
+  { zh: '超低延迟情绪化实时语音通话', en: 'REALTIME VOICE', col: '#10A37F' }
+].map((b, i) => {
+  const row = el('div', '', mythRows, 'display:flex;align-items:center;gap:28px');
+  const lbl = el('div', '', row, 'width:520px;font:800 34px/1 "Alibaba PuHuiTi";color:#25313D',
+    `${b.zh}<div class="mono" style="font-size:16px;color:#8C9AA8;letter-spacing:.14em;margin-top:6px">${b.en}</div>`
+  );
+  const track = el('div', '', row, 'flex:1;height:52px;border-radius:16px;background:#E3EAF2;overflow:hidden;position:relative;padding:6px');
+  const fill = el('div', '', track, `width:100%;height:40px;border-radius:12px;background:${b.col};transform-origin:0 50%;transform:scaleX(0)`);
+  const pct = el('div', 'num', row, `width:210px;text-align:right;font:900 48px/1 'Inter';color:${b.col}`, '0%');
+  return { ...b, row, fill, pct, t0: EV.myth_bars[i] };
+});
+
+// Giant Red Cross-Out SVG + Die-Cut Rubber Stamp ("【 伪命题 · 纯属忽悠 】")
+const mythSvg = sv('svg', { width: 1920, height: 820, style: 'position:absolute;left:240px;top:' + (CY - 440) + 'px;z-index:38;overflow:visible;pointer-events:none' }, screen);
+const cross1 = sv('path', { d: 'M 140 160 L 1780 700', fill: 'none', stroke: '#E63946', 'stroke-width': 26, 'stroke-linecap': 'round', pathLength: 1, 'stroke-dasharray': '1 1', 'stroke-dashoffset': 1 }, mythSvg);
+const cross2 = sv('path', { d: 'M 1780 160 L 140 700', fill: 'none', stroke: '#E63946', 'stroke-width': 26, 'stroke-linecap': 'round', pathLength: 1, 'stroke-dasharray': '1 1', 'stroke-dashoffset': 1 }, mythSvg);
+
+const redStamp = el('div', 'stk', screen,
+  `left:720px;top:${CY - 150}px;width:960px;height:320px;z-index:42;opacity:0`,
+  `<div style="width:960px;height:320px;border-radius:36px;background:#E63946;border:16px solid #F7F9FB;box-shadow:0 0 0 8px #E63946,0 32px 70px rgba(230,57,70,.45);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;padding:20px">
+     <div class="mono" style="font:900 26px/1 'Inter';letter-spacing:.32em;color:#FFD166">REALITY CHECK // 绝不可能</div>
+     <div style="font:900 108px/1.05 'Alibaba PuHuiTi';letter-spacing:.04em;margin-top:8px">纯属外行忽悠！</div>
+     <div style="font:800 32px/1 'Alibaba PuHuiTi';color:#FFE5E5;margin-top:10px">三大巨头早已放弃同质化内卷，走上不同进化路线</div>
+   </div>`
+);
+
+U.push(t => {
+  cHeader.style.opacity = oC(P(t, 8.15, 0.35));
+
+  const mb = popSS(t, EV.myth_board, 2.5, 0.42, 0.10);
+  const slamShake = wob(t - EV.stamp_slam, 6, 11) * (t >= EV.stamp_slam ? 1 : 0);
+  mythBoard.style.opacity = mb.o;
+  mythBoard.style.transform = `rotate(${(slamShake * -2.2).toFixed(2)}deg) scale(${(mb.s * (1 - 0.03 * Math.abs(slamShake))).toFixed(4)})`;
+
+  const clP = popSS(t, EV.myth_claim, 3.0, 0.34, 0.16);
+  mythBadge.style.transform = `scale(${clP.s.toFixed(3)}) rotate(${(Math.sin(t * 5) * 2.5).toFixed(2)}deg)`;
+
+  MYTH_BARS.forEach((b, i) => {
+    const u = oC(P(t, b.t0, 0.42));
+    // After stamp slam at 11.65s, the fake 100% bars fracture and drop back!
+    const breakU = oC(P(t, EV.stamp_slam, 0.25));
+    const val = lerp(Math.round(u * 100), [96, 98, 95, 97][i], breakU);
+    const barScale = lerp(u, 0.35 + (i % 2) * 0.2, breakU);
+    b.fill.style.transform = `scaleX(${barScale.toFixed(4)})`;
+    b.fill.style.background = breakU > 0.1 ? '#9AA8B6' : b.col;
+    b.pct.textContent = breakU > 0.5 ? '偏科!' : `${val}%`;
+    b.pct.style.color = breakU > 0.5 ? '#E63946' : b.col;
+    b.row.style.transform = `translateX(${(slamShake * (i % 2 ? 18 : -18)).toFixed(1)}px)`;
+  });
+
+  // Cross strokes & Giant Red Stamp Slam at 11.65s
+  const c1 = oC(P(t, EV.cross_draw[0], 0.18));
+  const c2 = oC(P(t, EV.cross_draw[0] + 0.14, 0.18));
+  cross1.setAttribute('stroke-dashoffset', (1 - c1).toFixed(3));
+  cross2.setAttribute('stroke-dashoffset', (1 - c2).toFixed(3));
+
+  const stSl = slap(t, EV.stamp_slam, 0.15, 0.55, -12);
+  redStamp.style.opacity = stSl.o;
+  redStamp.style.transform = `rotate(${(-5.5 + stSl.r).toFixed(2)}deg) scale(${stSl.sx.toFixed(4)}, ${stSl.sy.toFixed(4)})`;
+  redStamp.style.filter = shadow(stSl.lift, 0.38);
+});
+
+
+// ==================== ZONE D (12.88s - 17.00s): 真实工作流三大赛道矩阵 (HERO MOMENT) ====================
+const DY = 5180;
+const dHeader = el('div', 'a', screen,
+  `left:180px;top:${DY - 610}px;font:900 36px/1 'Alibaba PuHuiTi';color:#25313D;letter-spacing:.04em`,
+  `<span style="display:inline-block;width:24px;height:24px;background:#FF5A36;margin-right:14px;vertical-align:-2px;border-radius:4px"></span>03 真实生产力工作流 · 黄金分化路线 <span class="mono" style="color:#7C8B99;font-size:22px;letter-spacing:.18em;margin-left:16px">REAL-WORLD WORKFLOW MATRIX</span>`
+);
+
+// Graphic Match #3: 3 Core Orbs peel off from Zone C (12.74s) with dotted contrails and land into the 3 Workflow Tracks (13.34s-13.50s)
+const trailSvg = sv('svg', { width: WW, height: WH, style: 'position:absolute;left:0;top:0;z-index:34;overflow:visible;pointer-events:none' }, screen);
+
+const WORKFLOWS = [
+  {
+    id: 'claude', name: 'Claude', sub: '极客与文字工作者的第一顺位',
+    col: '#D97757', bg: '#FFF7ED', x: 480, y: DY - 120,
+    badge: '代码 & 文案之神',
+    bullets: ['前端 UI / Python 脚本一次成型', 'Claude Code 终端读库查 Bug', '去 AI 塑料感，口播分镜免大改'],
+    diorama: 'code'
+  },
+  {
+    id: 'gemini', name: 'Gemini', sub: '视觉创作者与海量吞吐破局者',
+    col: '#3186FF', bg: '#EFF6FF', x: 1200, y: DY - 120,
+    badge: '多模态 & 生态巨兽',
+    bullets: ['真·原生理解数 G 原片与音频', '百万窗口吞吐整座代码库/文献', 'Imagen + Veo + Google 云闭环'],
+    diorama: 'video'
+  },
+  {
+    id: 'chatgpt', name: 'ChatGPT', sub: '综合体验最顺滑的全能瑞士军刀',
+    col: '#10A37F', bg: '#ECFDF5', x: 1920, y: DY - 120,
+    badge: '实时交互 & 全能管家',
+    bullets: ['超低延迟高级语音陪练/头脑风暴', '联网搜索 + 画图 + Excel 分析', '长期记忆偏好的日常私人助理'],
+    diorama: 'voice'
+  }
+].map((w, i) => {
+  const tw = 640, th = 720;
+  // Build inside-card live animated diorama
+  let dioHtml = '';
+  if (w.diorama === 'code') {
+    dioHtml = `<div class="mono" style="height:175px;border-radius:22px;background:#161E29;padding:20px 24px;color:#E2E8F0;font-size:21px;line-height:1.55;overflow:hidden;position:relative">
+      <div style="display:flex;gap:8px;margin-bottom:10px"><span style="width:12px;height:12px;border-radius:50%;background:#FF5F56"></span><span style="width:12px;height:12px;border-radius:50%;background:#FFBD2E"></span><span style="width:12px;height:12px;border-radius:50%;background:#27C93F"></span><span style="margin-left:auto;color:#D97757;font-weight:800">claude-code ✓</span></div>
+      <div class="code-l1" style="color:#93C5FD">&gt; build BentoGrid --theme dark</div>
+      <div class="code-l2" style="color:#A7F3D0">✓ 14 components compiled (0 errors)</div>
+      <div class="code-l3" style="color:#FDE68A">✓ Human-grade script polished</div>
+    </div>`;
+  } else if (w.diorama === 'video') {
+    dioHtml = `<div class="mono" style="height:175px;border-radius:22px;background:#161E29;padding:20px 24px;color:#E2E8F0;font-size:20px;position:relative;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;margin-bottom:12px"><span style="color:#60A5FA;font-weight:800">RAW_4K_FOOTAGE.MP4 (4.8GB)</span><span style="color:#34D399">2,000,000 TOKENS</span></div>
+      <div style="height:28px;border-radius:8px;background:#263445;margin-bottom:10px;overflow:hidden;display:flex;gap:4px;padding:4px">
+        <div style="flex:2;background:#3186FF;border-radius:4px"></div><div style="flex:1;background:#8B5CF6;border-radius:4px"></div><div style="flex:2;background:#08B962;border-radius:4px"></div>
+      </div>
+      <div style="height:24px;border-radius:8px;background:#263445;overflow:hidden;display:flex;gap:6px;padding:4px">
+        <div style="flex:1;background:#FABC12;border-radius:4px"></div><div style="flex:3;background:#F94543;border-radius:4px"></div>
+      </div>
+      <div class="playhead" style="position:absolute;top:14px;bottom:14px;width:4px;background:#FF5A36;box-shadow:0 0 12px #FF5A36"></div>
+    </div>`;
+  } else {
+    dioHtml = `<div class="mono" style="height:175px;border-radius:22px;background:#161E29;padding:20px 24px;color:#E2E8F0;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="color:#34D399;font-size:20px;font-weight:800">● VOICE MODE LIVE</div>
+        <div style="color:#94A3B8;font-size:18px;margin-top:8px">Latency: 240ms · Emotion ON</div>
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <span style="padding:4px 10px;border-radius:6px;background:#1E293B;color:#38BDF8;font-size:16px">Web</span>
+          <span style="padding:4px 10px;border-radius:6px;background:#1E293B;color:#A7F3D0;font-size:16px">Python</span>
+          <span style="padding:4px 10px;border-radius:6px;background:#1E293B;color:#FDE68A;font-size:16px">Memory</span>
+        </div>
+      </div>
+      <div class="wave-box" style="display:flex;align-items:center;gap:6px;height:110px;padding-right:10px">
+        ${[0,1,2,3,4,5,6,7,8].map(() => `<span class="wbar" style="width:9px;height:40px;border-radius:5px;background:#10A37F;display:inline-block"></span>`).join('')}
+      </div>
+    </div>`;
+  }
+
+  const card = el('div', 'stk', screen,
+    `width:${tw}px;height:${th}px;border-radius:44px;background:#F7F9FB;border:12px solid #F7F9FB;box-shadow:0 26px 64px rgba(18,28,40,.24);padding:38px 40px;z-index:${28 + i};opacity:0`,
+    `<div style="display:flex;align-items:center;justify-content:space-between">
+       <div>
+         <div class="num" style="font:900 62px/1 'Inter';color:#1D2731;letter-spacing:-.03em">${w.name}</div>
+         <div style="font:800 26px/1.2 'Alibaba PuHuiTi';color:${w.col};margin-top:8px">${w.sub}</div>
+       </div>
+       <div style="width:96px;height:96px;border-radius:26px;background:${w.bg};display:flex;align-items:center;justify-content:center">
+         <div style="transform:scale(0.68)">${LOGO_SVG[w.id]}</div>
+       </div>
+     </div>
+     <div style="margin-top:26px">${dioHtml}</div>
+     <div style="margin-top:28px;display:flex;flex-direction:column;gap:18px">
+       ${w.bullets.map(b => `<div style="display:flex;align-items:center;gap:14px;font:800 28px/1.2 'Alibaba PuHuiTi';color:#25313D">
+         <span style="width:16px;height:16px;border-radius:50%;background:${w.col};flex:none"></span>${b}
+       </div>`).join('')}
+     </div>`
+  );
+
+  // Rubber Stamp Seal on each Workflow Track (single-line nowrap!)
+  const stamp = el('div', 'stk', screen,
+    `height:74px;padding:0 28px;border-radius:18px;background:${w.col};border:8px solid #F7F9FB;box-shadow:0 14px 30px rgba(18,28,40,.28);color:#fff;font:900 30px/1 'Alibaba PuHuiTi';white-space:nowrap;display:flex;align-items:center;justify-content:center;z-index:38;opacity:0`,
+    `★ ${w.badge}`
+  );
+
+  // Graphic Match #3 flying orb + dotted contrail from Zone C (1200, CY) to Zone D card header
+  const sx = 1200 + (i - 1) * 260, sy = CY + 80;
+  const tx = w.x, ty = w.y - 260;
+  const cx = (sx + tx) / 2 + (i - 1) * 180, cy = (sy + ty) / 2;
+  const trail = sv('path', {
+    d: `M${sx} ${sy} Q${cx} ${cy} ${tx} ${ty}`,
+    fill: 'none', stroke: w.col, 'stroke-width': 7, 'stroke-linecap': 'round',
+    'stroke-dasharray': '4 18', opacity: 0
+  }, trailSvg);
+  const orb = sv('circle', { r: 28, fill: w.col, stroke: '#F7F9FB', 'stroke-width': 9, opacity: 0 }, trailSvg);
+
+  return {
+    ...w, tw, th, card, stamp, trail, orb,
+    playhead: card.querySelector('.playhead'),
+    wbars: [...card.querySelectorAll('.wbar')],
+    tLand: EV.orbs_land[i], tTrack: EV.tracks_in[i], tBadge: EV.workflow_badges[i]
+  };
+});
+
+// Bottom Hero Lockup Banner ("抛开枯燥跑分榜单 · 直接从真实生产力场景选工具")
+const heroBanner = el('div', 'stk', screen,
+  `left:200px;top:${DY + 310}px;width:2000px;height:210px;border-radius:42px;background:#1D2731;border:12px solid #F7F9FB;box-shadow:0 30px 80px rgba(10,16,24,.42);padding:34px 64px;display:flex;align-items:center;justify-content:space-between;color:#fff;z-index:36;opacity:0`,
+  `<div>
+     <div class="mono" style="font:800 22px/1 'Inter';color:#FF5A36;letter-spacing:.22em">THE GOLDEN RULE // 终极选购法则</div>
+     <div style="font:900 62px/1.15 'Alibaba PuHuiTi';margin-top:12px;position:relative">
+       抛开枯燥跑分榜单，从<span style="position:relative;display:inline-block;margin:0 8px"><i id="dMark" style="position:absolute;left:-6px;right:-6px;bottom:2px;height:28px;background:#FF5A36;border-radius:6px;transform-origin:0 50%;transform:scaleX(0)"></i><span style="position:relative">真实生产力工作流</span></span>出发！
+     </div>
+   </div>
+   <div style="padding:20px 36px;border-radius:24px;background:#FF5A36;font:900 38px/1 'Alibaba PuHuiTi';color:#fff;box-shadow:0 12px 28px rgba(255,90,54,.4)">
+     按钉子选锤子 →
+   </div>`
+);
+const dMark = heroBanner.querySelector('#dMark');
+
+U.push(t => {
+  dHeader.style.opacity = oC(P(t, 13.0, 0.38));
+
+  WORKFLOWS.forEach((w, i) => {
+    // Graphic Match #3 orb flight along quadratic bezier
+    const uOrb = eFly(P(t, EV.orbs_peel + i * 0.04, w.tLand - (EV.orbs_peel + i * 0.04)));
+    if (t < EV.orbs_peel + i * 0.04 || t >= w.tLand + 0.15) {
+      w.orb.setAttribute('opacity', '0');
+      w.trail.setAttribute('opacity', t >= w.tLand && t < 15.2 ? (1 - P(t, w.tLand, 1.2)).toFixed(2) : '0');
+    } else {
+      const len = w.trail.getTotalLength();
+      const pt = w.trail.getPointAtLength(len * uOrb);
+      w.orb.setAttribute('cx', pt.x.toFixed(1));
+      w.orb.setAttribute('cy', pt.y.toFixed(1));
+      w.orb.setAttribute('opacity', '1');
+      w.trail.setAttribute('opacity', '0.85');
+    }
+
+    // Track Card Slap & Idle Float
+    const sl = slap(t, w.tTrack, 0.20, 0.32, (i - 1) * 4);
+    const flY = Math.sin(t * 2.6 + i * 1.8) * 6;
+    w.card.style.opacity = sl.o;
+    w.card.style.transform = `translate(${(w.x - w.tw / 2).toFixed(1)}px, ${(w.y - w.th / 2 + flY).toFixed(1)}px) rotate(${sl.r.toFixed(2)}deg) scale(${sl.sx.toFixed(4)}, ${sl.sy.toFixed(4)})`;
+
+    // Live inside-card micro-animations
+    if (w.playhead) {
+      const px = 28 + ((t * 140) % 500);
+      w.playhead.style.left = `${px.toFixed(1)}px`;
+    }
+    if (w.wbars.length) {
+      w.wbars.forEach((bar, bi) => {
+        const h = 24 + Math.abs(Math.sin(t * 9.5 + bi * 0.75)) * 74;
+        bar.style.height = `${h.toFixed(1)}px`;
+      });
+    }
+
+    // Rubber Stamp Badge Slap
+    const bSl = slap(t, w.tBadge, 0.16, 0.44, -8 + i * 4);
+    w.stamp.style.opacity = bSl.o;
+    w.stamp.style.transform = `translate(${(w.x - 40).toFixed(1)}px, ${(w.y + 305 + flY).toFixed(1)}px) rotate(${(-4 + i * 3 + bSl.r).toFixed(2)}deg) scale(${bSl.sx.toFixed(4)}, ${bSl.sy.toFixed(4)})`;
+  });
+
+  // Final Hero Lockup Banner
+  const hb = slap(t, EV.hero_banner, 0.20, 0.28, -2);
+  const hbBreath = Math.sin(t * 3.0) * 3;
+  heroBanner.style.opacity = hb.o;
+  heroBanner.style.transform = `translate(0px, ${hbBreath.toFixed(1)}px) rotate(${hb.r.toFixed(2)}deg) scale(${hb.sx.toFixed(4)}, ${hb.sy.toFixed(4)})`;
+  dMark.style.transform = `scaleX(${ioC(P(t, EV.marker_d[0], EV.marker_d[1] - EV.marker_d[0])).toFixed(4)})`;
+});
+
+
+// ==================== BOTTOM CHAPTER RAIL HUD (from 19-paperclip) ====================
+const hLogo = el('div', 'a', hud,
+  `left:88px;top:1012px;font:900 24px/1 'Alibaba PuHuiTi';color:#25313D;letter-spacing:.06em`,
+  `<span style="display:inline-block;width:15px;height:15px;background:#FF5A36;margin-right:12px;vertical-align:-1px;border-radius:3px"></span>AI 生产力实验室 <span class="mono" style="font-size:16px;letter-spacing:.22em;margin-left:12px;opacity:.65">MG ENGINE v2.0</span>`
+);
+const CHP = [
+  ['01', '高频提问 (0.0s)'],
+  ['02', '三巨头对决 (1.8s)'],
+  ['03', '破除伪概念 (8.0s)'],
+  ['04', '真实工作流 (12.9s)']
+];
+const CHT = cues.chapters;
+const RX = 1060, RW = 770, SGW = (RW - 3 * 12) / 4;
+const hCh = CHP.map((c, i) => {
+  const e = el('div', 'a', hud,
+    `left:${RX + i * (SGW + 12)}px;top:1006px;width:${SGW}px;font:800 18px/1 'Alibaba PuHuiTi';color:#25313D;white-space:nowrap`,
+    `<span class="mono" style="font-weight:800;font-size:15px;color:#FF5A36;margin-right:8px">${c[0]}</span>${c[1]}`
+  );
+  const tr = el('div', 'a', hud,
+    `left:${RX + i * (SGW + 12)}px;top:1036px;width:${SGW}px;height:5px;border-radius:3px;background:rgba(37,49,61,.16);overflow:hidden`
+  );
+  const f = el('div', 'a', tr, `left:0;top:0;width:${SGW}px;height:5px;background:#FF5A36;transform-origin:0 50%`);
+  return { e, tr, f };
+});
+
+// ==================== CAMERA MOTION BLUR & MASTER RENDER LOOP ====================
+const camEl = document.getElementById('cam');
+const mbg = document.getElementById('mbg');
+const dotsEl = document.getElementById('dots');
+
+function camBlur(t) {
+  const h = 1 / 60;
+  const A = cam(Math.max(0, t - h)), B = cam(Math.min(cues.duration, t + h));
+  const vx = Math.abs((A.x - B.x) * B.z) * 0.22;
+  const vy = Math.abs((A.y - B.y) * B.z) * 0.22;
+  if (vx + vy < 1.2) {
+    camEl.style.filter = 'none';
+  } else {
+    mbg.setAttribute('stdDeviation', `${Math.min(5, vx).toFixed(2)} ${Math.min(14, vy).toFixed(2)}`);
+    camEl.style.filter = 'url(#mbf)';
+  }
+}
+
+window.renderAt = async (t0) => {
+  const t = clamp(t0, 0, cues.duration);
+  const C = cam(t), W = worldM(t, C);
+  world.style.transform = `matrix(${W.m.map(v => v.toFixed(5)).join(',')})`;
+  camBlur(t);
+
+  // Subtle ambient drift on dot grid & geometric background shapes
+  dotsEl.style.transform = `translate(${(Math.sin(t * 0.7) * 18).toFixed(1)}px, ${(Math.cos(t * 0.5) * 18).toFixed(1)}px)`;
+  DECO_ITEMS.forEach(d => {
+    const dy = Math.sin(t * 2.1 + d.phase) * 16;
+    const dr = t * 28 * (d.kind === 'ring' ? 0.5 : 1) + d.phase * 40;
+    d.g.setAttribute('transform', `translate(${d.x} ${(d.y + dy).toFixed(1)}) rotate(${dr.toFixed(1)}) scale(${d.s})`);
+  });
+
+  // Update all scene zones
+  for (const fn of U) fn(t, C, W);
+
+  // Update bottom chapter progress rail
+  hCh.forEach((h, i) => {
+    const on = t >= CHT[i] && t < CHT[i + 1];
+    h.e.style.opacity = on ? '1' : '0.45';
+    h.f.style.transform = `scaleX(${clamp((t - CHT[i]) / (CHT[i + 1] - CHT[i])).toFixed(4)})`;
+  });
+};
+
+await document.fonts.ready;
+await window.renderAt(0);
+window.__ready = true;
+</script>
+</body>
+</html>

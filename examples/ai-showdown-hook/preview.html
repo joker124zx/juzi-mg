@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>AI 终极横评 · 17s MG Hook 预览器 (帧级快进 + 音画同步)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; background: #0B0F15; color: #E2E8F0;
+    font: 13px/1.4 "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    overflow: hidden;
+  }
+  body { display: flex; flex-direction: column; }
+  .top-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 18px; background: #111822; border-bottom: 1px solid #1E293B;
+  }
+  .top-title { font-weight: 800; font-size: 14px; color: #F8FAFC; display: flex; align-items: center; gap: 10px; }
+  .badge { background: #FF5A36; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 800; }
+  .chapters { display: flex; gap: 8px; }
+  .ch-btn {
+    background: #1E293B; color: #CBD5E1; border: 1px solid #334155; border-radius: 6px;
+    padding: 5px 11px; cursor: pointer; font: 700 12px inherit; transition: 0.15s;
+  }
+  .ch-btn:hover, .ch-btn.active { background: #FF5A36; color: #fff; border-color: #FF5A36; }
+  #stage { flex: 1; position: relative; overflow: hidden; background: #070A0E; }
+  #f { position: absolute; border: 0; transform-origin: 0 0; background: #141B24; box-shadow: 0 20px 60px rgba(0,0,0,0.65); }
+  #msg { position: absolute; inset: 0; display: grid; place-items: center; color: #94A3B8; font-size: 15px; pointer-events: none; }
+  .ctl {
+    display: flex; gap: 10px; align-items: center; padding: 12px 18px;
+    background: #111822; border-top: 1px solid #1E293B;
+  }
+  .ctl button, .ctl select {
+    background: #1E293B; color: #F1F5F9; border: 1px solid #334155; border-radius: 6px;
+    padding: 6px 12px; font: 700 12px inherit; cursor: pointer;
+  }
+  .ctl button:hover { background: #334155; }
+  .ctl button.primary { background: #FF5A36; border-color: #FF5A36; color: #fff; min-width: 72px; }
+  .ctl input[type=range] {
+    flex: 1; accent-color: #FF5A36; height: 6px; cursor: pointer;
+  }
+  #lbl {
+    font: 700 12px "JetBrains Mono", "Consolas", monospace;
+    min-width: 170px; text-align: right; color: #94A3B8;
+  }
+  #subBar {
+    position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+    background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(255,255,255,0.14);
+    padding: 8px 22px; border-radius: 999px; color: #F8FAFC; font-weight: 700; font-size: 16px;
+    pointer-events: none; letter-spacing: 0.02em; white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<div class="top-bar">
+  <div class="top-title">
+    <span class="badge">MG ENGINE</span>
+    <span>AI 终极横评 · 0–17s 破题样片（大画布贴纸 + 2.5D 键帽 + 帧级 MGAudio 音效）</span>
+  </div>
+  <div class="chapters">
+    <button class="ch-btn" data-t="0.0">Zone A · 高频提问 (0.0s)</button>
+    <button class="ch-btn" data-t="1.84">Zone B · 三巨头对决 (1.84s)</button>
+    <button class="ch-btn" data-t="6.45">Zone B2 · 账单花字 (6.45s)</button>
+    <button class="ch-btn" data-t="8.02">Zone C · 破除忽悠 (8.02s)</button>
+    <button class="ch-btn" data-t="11.55">Zone C2 · 盖章暴击 (11.55s)</button>
+    <button class="ch-btn" data-t="12.88">Zone D · 真实工作流 (12.88s)</button>
+  </div>
+</div>
+
+<div id="stage">
+  <iframe id="f" src="./index.html"></iframe>
+  <div id="subBar">点击「播放」或直接拖动下方进度条任意快进 / 逐帧检视</div>
+  <div id="msg">正在加载 2400×6100 大画布与 MGAudio 音轨…</div>
+</div>
+
+<div class="ctl">
+  <button id="play" class="primary">▶ 播放</button>
+  <button id="prevF" title="上一帧 (←)">-1帧</button>
+  <button id="nextF" title="下一帧 (→)">+1帧</button>
+  <input id="t" type="range" min="0" max="17" step="0.001" value="0">
+  <select id="spd">
+    <option value="0.5">0.5x 慢放</option>
+    <option value="1" selected>1.0x 原速</option>
+    <option value="1.5">1.5x 倍速</option>
+  </select>
+  <span id="lbl">0.000 s / 17.000 s · f0</span>
+</div>
+
+<audio id="snd" src="./out/audio.wav" preload="auto"></audio>
+
+<script>
+const $ = id => document.getElementById(id);
+const f = $('f'), t = $('t'), lbl = $('lbl'), btn = $('play'), snd = $('snd'), subBar = $('subBar'), spd = $('spd');
+let D = { width: 1920, height: 1080, fps: 30, duration: 17.0 };
+let busy = false, want = null, playing = false, lastTs = 0, curT = 0;
+
+const SUBS = [
+  [0.25, 1.84, "“每天都有人问我：”"],
+  [1.84, 5.32, "“现在 Gemini、Claude 和 ChatGPT…”"],
+  [5.32, 6.53, "“…到底哪个最强？”"],
+  [6.53, 8.02, "“我该充哪一个？”"],
+  [8.02, 11.60, "“说实话，如果现在还有人告诉你：某一个模型在所有领域…”"],
+  [11.60, 12.88, "“…吊打其他两个！”"],
+  [12.88, 17.00, "“那他一定没有在真实工作流里深度用过它们。”"]
+];
+
+function fit() {
+  const s = $('stage'), k = Math.min((s.clientWidth - 24) / D.width, (s.clientHeight - 60) / D.height);
+  f.style.width = D.width + 'px';
+  f.style.height = D.height + 'px';
+  f.style.transform = `translate(${(s.clientWidth - D.width * k) / 2}px, ${(s.clientHeight - 40 - D.height * k) / 2}px) scale(${k})`;
+}
+
+async function seek(x, syncAudio = false) {
+  curT = Math.max(0, Math.min(D.duration, x));
+  t.value = curT;
+  if (syncAudio && snd.readyState >= 1) {
+    try { snd.currentTime = curT; } catch (e) {}
+  }
+  const activeSub = SUBS.find(s => curT >= s[0] && curT < s[1]);
+  subBar.textContent = activeSub ? activeSub[2] : "AI 终极横评 · 01 破题";
+
+  document.querySelectorAll('.ch-btn').forEach((b, idx, arr) => {
+    const bt = +b.dataset.t;
+    const nt = idx + 1 < arr.length ? +arr[idx + 1].dataset.t : D.duration + 1;
+    b.classList.toggle('active', curT >= bt && curT < nt);
+  });
+
+  want = curT;
+  if (busy) return;
+  busy = true;
+  while (want != null) {
+    const s = want; want = null;
+    const w = f.contentWindow;
+    if (w && w.renderAt) {
+      try { await w.renderAt(s); } catch (e) { console.error(e); }
+    }
+    lbl.textContent = `${s.toFixed(3)} s / ${D.duration.toFixed(1)} s · f${Math.round(s * D.fps)}`;
+  }
+  busy = false;
+}
+
+function loop(now) {
+  if (!playing) return;
+  const dt = (now - lastTs) / 1000 * (+spd.value);
+  lastTs = now;
+  let nextT = (!snd.paused && snd.readyState >= 2) ? snd.currentTime : curT + dt;
+  if (nextT >= D.duration) {
+    nextT = 0;
+    if (!snd.paused) snd.currentTime = 0;
+  }
+  seek(nextT, false);
+  requestAnimationFrame(loop);
+}
+
+function togglePlay() {
+  playing = !playing;
+  btn.textContent = playing ? '⏸ 暂停' : '▶ 播放';
+  if (playing) {
+    lastTs = performance.now();
+    snd.playbackRate = +spd.value;
+    snd.currentTime = curT;
+    snd.play().catch(() => {});
+    requestAnimationFrame(loop);
+  } else {
+    snd.pause();
+  }
+}
+
+btn.onclick = togglePlay;
+spd.onchange = () => { snd.playbackRate = +spd.value; };
+t.oninput = () => {
+  if (playing) togglePlay();
+  seek(+t.value, true);
+};
+$('prevF').onclick = () => { if (playing) togglePlay(); seek(curT - 1 / D.fps, true); };
+$('nextF').onclick = () => { if (playing) togglePlay(); seek(curT + 1 / D.fps, true); };
+
+document.querySelectorAll('.ch-btn').forEach(b => {
+  b.onclick = () => {
+    seek(+b.dataset.t, true);
+  };
+});
+
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
+  if (e.code === 'ArrowLeft') { e.preventDefault(); if (playing) togglePlay(); seek(curT - 1 / D.fps, true); }
+  if (e.code === 'ArrowRight') { e.preventDefault(); if (playing) togglePlay(); seek(curT + 1 / D.fps, true); }
+});
+
+f.onload = async () => {
+  const w = f.contentWindow;
+  while (!w || w.__ready !== true) await new Promise(r => setTimeout(r, 60));
+  D = Object.assign(D, w.DEMO || {});
+  t.max = D.duration;
+  fit();
+  $('msg').remove();
+  seek(0, true);
+};
+window.addEventListener('resize', fit);
+</script>
+</body>
+</html>

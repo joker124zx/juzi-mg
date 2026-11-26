@@ -1,0 +1,35 @@
+{
+  "fps": 30,
+  "duration": 18.0,
+  "bpm": 120,
+  "voiceover": "../assets/segments/02_s02_divergence.wav",
+  "audio_sync": {
+    "codec_offset_sec": 0.042,
+    "note": "video-shotcraft S5: AAC priming offset compensation (1.28f @ 30fps)"
+  },
+  "ev": {
+    "monolith_in": 0.12,
+    "title_b1": 0.22,
+    "monolith_shatter": 1.92,
+    "orbit_start": 2.45,
+    "towers_build": [2.85, 3.45, 4.05],
+    "cards_b1": [3.05, 3.65, 4.25],
+    "b2_transition": 5.45,
+    "coins_drop": [5.85, 6.22, 6.58, 6.92],
+    "waste_alarm": 7.15,
+    "maze_detour": 7.65,
+    "maze_barriers": [8.15, 8.68, 9.15],
+    "shortcut_snap": 9.58,
+    "b3_transition": 10.25,
+    "leaderboard_in": 10.42,
+    "stamp_slam": 11.48,
+    "matrix_unfold": 12.28,
+    "scan_steps": [12.55, 13.20, 13.85],
+    "value_fly": [12.78, 13.42, 14.08],
+    "b4_dive": 14.68,
+    "compass_lock": 15.35,
+    "pillars_lock": [15.52, 15.68, 15.84],
+    "final_hold_start": 16.15
+  },
+  "chapters": [0.0, 5.45, 10.25, 14.68, 18.0]
+}
